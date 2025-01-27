@@ -1,0 +1,13 @@
+sacred_runs
+bert
+ckp/*
+mybert
+result
+MyNet/NHFNet/modules/__pycache__/
+MyNet/model/gadgets/__pycache__/
+MyNet/model/gadgets/*.pyc
+**/__pycache__/
+**/*.pyc
+
+TVLT-MOSEI-EA.ckpt
+TVLT-MOSEI-SA.ckpt
