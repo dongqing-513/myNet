@@ -67,38 +67,39 @@ def config():
     num_layers = int(12)
     mlp_ratio = float(4.0)
     use_mae = bool(False)
-    drop_rate = float(0.4)  # 用于所有dropout参数 当前值0.1
+    drop_rate = float(0.2)  # 用于所有dropout参数 当前值0.1
     fusion_type = str('concat')  # 融合方式：'concat', 'add', 'gate'
     skip_interval = int(1)  # 跳跃连接间隔，每隔几层添加一次跳跃连接
     normalize_before = bool(True)  # 是否在attention和FFN之前进行归一化
     
     # Optimizer Setting
     optim_type = "adamw"
-    learning_rate = 5e-6      # 进一步降低基础学习率，避免训练不稳定
-    weight_decay = 0.05       # 增加权重衰减，加强正则化
+    learning_rate = 2e-5      # 适当提高学习率，让模型能够跳出局部最优
+    weight_decay = 0.02       # 降低权重衰减，给模型更多探索空间
     decay_power = 1
     max_epoch = 20       # 增加训练轮数
     max_steps = 1000000
-    warmup_steps = 2000      # 增加预热步数
-    warmup_ratio = 0.15      # 增加预热比例，使训练更稳定
-    beta1 = 0.9              # Adam优化器的beta1参数
-    beta2 = 0.999            # Adam优化器的beta2参数
-    eps = 1e-8               # Adam优化器的epsilon参数
+    warmup_steps = 1000      # 减少预热步数
+    warmup_ratio = 0.1       # 降低预热比例
+    beta1 = 0.9
+    beta2 = 0.98             # 调整beta2，增加动量
+    eps = 1e-8
     
     # 学习率调度器设置
-    lr_scheduler = "cosine_warmup"   # 使用带预热的余弦退火调度
-    min_lr_ratio = 0.05      # 最小学习率为初始学习率的5%
+    lr_scheduler = "cosine_warmup"
+    min_lr_ratio = 0.01      # 降低最小学习率比例
     
     # Dropout和正则化设置
-    attention_dropout = 0.4   # 增加注意力层的dropout
-    hidden_dropout = 0.4      # 增加隐藏层的dropout
+    attention_dropout = 0.2   # 降低dropout率，因为我们已经有了低阶融合模块
+    hidden_dropout = 0.2
+    drop_rate = 0.2          # 统一降低dropout率
     
     # 梯度裁剪
-    gradient_clip_val = 0.5   # 降低梯度裁剪阈值，避免梯度爆炸
+    gradient_clip_val = 1.0   # 增加梯度裁剪阈值，给优化过程更多空间
     
     # 早停设置
-    early_stopping_patience = 5    # 减少耐心值，避免无效训练
-    early_stopping_min_delta = 0.001  # 提高改善阈值
+    early_stopping_patience = 7    # 增加耐心值，给模型更多机会
+    early_stopping_min_delta = 0.0005  # 降低改善阈值，使模型能够捕捉到小的改进
     
     # 验证设置
     val_check_interval = 0.5  # 增加验证频率
@@ -181,7 +182,7 @@ def task_cls_mosei():
     # 词汇表的大小。可以识别的不同单词或标记的总数。表示模型的词汇表中有 768 个不同的元素。
     vocab_size = 30522
     # 输入文本的最大长度。如果文本长度超过这个值，可能会被截断。表示最长的文本长度为 768 个标记或字符。
-    max_text_len = 220 # 512 (audio patch size (2,128))225 78
+    max_text_len = 197 # 512 (audio patch size (2,128))225 78 220
     # 是否进行全词掩码。以整个单词为单位进行掩码或单个标记
     whole_word_masking = False
     # 随机掩码标记的概率。有 0.15 的概率会随机选择一个标记进行掩码，然后让模型预测被掩码的标记
