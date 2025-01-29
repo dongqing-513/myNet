@@ -30,7 +30,7 @@ def config():
     datasets = []
     loss_names = _loss_names({})
     # batch_size = 4096  # 将批量大小调整为64 this is a desired batch size; pl trainer will accumulate gradients when per step bat
-    batch_size = 32
+    batch_size = 16
 
     max_text_len = 40
     draw_false_text = 0
@@ -74,32 +74,38 @@ def config():
     
     # Optimizer Setting
     optim_type = "adamw"
-    learning_rate = 2e-5      # 适当提高学习率，让模型能够跳出局部最优
-    weight_decay = 0.02       # 降低权重衰减，给模型更多探索空间
+    learning_rate = 1e-4      # 提高基础学习率，让TVLT能更好学习
+    weight_decay = 0.01       # 适当降低权重衰减
     decay_power = 1
     max_epoch = 20       # 增加训练轮数
     max_steps = 1000000
-    warmup_steps = 1000      # 减少预热步数
-    warmup_ratio = 0.1       # 降低预热比例
+    warmup_steps = 2000      # 增加预热步数
+    warmup_ratio = 0.05      # 降低预热比例，更平缓的开始
     beta1 = 0.9
-    beta2 = 0.98             # 调整beta2，增加动量
+    beta2 = 0.999            # 使用更标准的beta2值
     eps = 1e-8
     
     # 学习率调度器设置
     lr_scheduler = "cosine_warmup"
-    min_lr_ratio = 0.01      # 降低最小学习率比例
+    min_lr_ratio = 0.001     # 降低最小学习率比例，避免后期学习停滞
     
     # Dropout和正则化设置
-    attention_dropout = 0.2   # 降低dropout率，因为我们已经有了低阶融合模块
-    hidden_dropout = 0.2
-    drop_rate = 0.2          # 统一降低dropout率
+    attention_dropout = 0.1   # 降低dropout率，因为模型较大
+    hidden_dropout = 0.1
+    drop_rate = 0.1          # 统一降低dropout率
+    
+    # 模型结构设置
+    fusion_type = 'concat'     # 使用门控机制进行特征融合
+    skip_interval = 2        # 增加跳跃连接间隔
+    normalize_before = True   # 保持在attention和FFN之前进行归一化
     
     # 梯度裁剪
-    gradient_clip_val = 1.0   # 增加梯度裁剪阈值，给优化过程更多空间
+    gradient_clip_val = 1.0   # 对TVLT使用较大的裁剪阈值
+    gradient_clip_val_msaf = 0.5  # 对MSAF使用较小的裁剪阈值
     
     # 早停设置
-    early_stopping_patience = 7    # 增加耐心值，给模型更多机会
-    early_stopping_min_delta = 0.0005  # 降低改善阈值，使模型能够捕捉到小的改进
+    early_stopping_patience = 5    # 减少耐心值，及时停止过拟合
+    early_stopping_min_delta = 0.001  # 添加最小改善阈值
     
     # 验证设置
     val_check_interval = 0.5  # 增加验证频率
@@ -118,14 +124,14 @@ def config():
     # below params varies with the environment
     data_root = ""
     log_dir = "result"
-    per_gpu_batchsize = 0  # you should define this manually with per_gpu_batch_size=#
+    per_gpu_batchsize = 1  # you should define this manually with per_gpu_batch_size=#
     gpus = 2
     # gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
     num_nodes = 1
     strict_load = False
     load_local_path = ""
     load_hub_path = ""
-    num_workers = 32
+    num_workers = 16
 
     
 @ex.named_config

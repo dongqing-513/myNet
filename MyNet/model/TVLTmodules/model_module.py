@@ -311,56 +311,63 @@ class Transformer(pl.LightningModule):
 
     # 配置模型的优化器和学习率调度器。
     def configure_optimizers(self):
-        optimizer = AdamW(self.parameters(), lr=self.learning_rate, eps=1e-8, betas=(0.9, 0.98), weight_decay=self.weight_decay)
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=self.warmup_steps,
-            num_training_steps=self.max_steps,
-        )
-        sched = {"scheduler": scheduler, "interval": "step"}
-        return (
-            [optimizer],
-            [sched],
-        )
-        """
-        # 创建参数组，对不同层使用不同的学习率
+        # 为不同组件创建不同的参数组
         no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
+        
+        # Transformer参数组
+        transformer_params = [
             {
-                "params": [p for n, p in self.named_parameters() if not any(nd in n for nd in no_decay)],
+                "params": [p for n, p in self.transformer.named_parameters() 
+                          if not any(nd in n for nd in no_decay)],
                 "weight_decay": self.weight_decay,
+                "lr": self.learning_rate
             },
             {
-                "params": [p for n, p in self.named_parameters() if any(nd in n for nd in no_decay)],
+                "params": [p for n, p in self.transformer.named_parameters() 
+                          if any(nd in n for nd in no_decay)],
                 "weight_decay": 0.0,
-            },
+                "lr": self.learning_rate
+            }
         ]
         
-        # 使用AdamW优化器
+        # MSAF参数组 - 使用较小的学习率
+        msaf_params = [
+            {
+                "params": [p for n, p in self.msaf.named_parameters() 
+                          if not any(nd in n for nd in no_decay)],
+                "weight_decay": self.weight_decay,
+                "lr": self.learning_rate * 0.1  # MSAF使用较小的学习率
+            },
+            {
+                "params": [p for n, p in self.msaf.named_parameters() 
+                          if any(nd in n for nd in no_decay)],
+                "weight_decay": 0.0,
+                "lr": self.learning_rate * 0.1
+            }
+        ]
+        
+        # 合并所有参数组
+        optimizer_grouped_parameters = transformer_params + msaf_params
+        
+        # 使用AdamW优化器，添加梯度裁剪
         optimizer = AdamW(
             optimizer_grouped_parameters,
             lr=self.learning_rate,
             eps=1e-8,
-            betas=(0.9, 0.999),  # 调整beta2为更常用的0.999
+            betas=(0.9, 0.999),
             weight_decay=self.weight_decay,
         )
         
-        # 确保总训练步数是整数
-        num_training_steps = int(self.max_steps)
-        warmup_steps = int(self.warmup_steps)
+        # 计算训练步数
+        num_training_steps = self.max_steps
+        warmup_steps = self.warmup_steps
         
-        # 使用OneCycleLR调度器
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        # 使用分段余弦学习率调度器
+        scheduler = get_cosine_schedule_with_warmup(
             optimizer,
-            max_lr=self.learning_rate,
-            total_steps=num_training_steps,
-            pct_start=warmup_steps / num_training_steps,  # 将warmup_steps转换为比例
-            anneal_strategy='cos', # 使用余弦退火
-            cycle_momentum=True,
-            base_momentum=0.85,
-            max_momentum=0.95,
-            div_factor=25.0,  # 初始学习率为max_lr/25
-            final_div_factor=1e4,  # 最终学习率为max_lr/10000
+            num_warmup_steps=warmup_steps,
+            num_training_steps=num_training_steps,
+            num_cycles=0.5  # 添加半个余弦周期
         )
         
         # 返回优化器和调度器配置
@@ -370,35 +377,28 @@ class Transformer(pl.LightningModule):
                 "scheduler": scheduler,
                 "interval": "step",
                 "frequency": 1,
+                "monitor": "val/loss",  # 监控验证损失
             },
         }
-        """
-"""
+
     def on_before_optimizer_step(self, optimizer):
         # 对不同组件分别进行梯度裁剪
         # transformer部分
         transformer_params = [p for name, p in self.transformer.named_parameters() if p.requires_grad]
         if transformer_params:
             torch.nn.utils.clip_grad_norm_(transformer_params, max_norm=1.0)
-            
+        
         # msaf部分
         msaf_params = [p for name, p in self.msaf.named_parameters() if p.requires_grad]
         if msaf_params:
             torch.nn.utils.clip_grad_norm_(msaf_params, max_norm=0.5)  # msaf使用更小的裁剪阈值
-            
+        
         # 记录梯度信息
         if self.training:
             # 计算梯度范数
-            total_norm = 0
-            for p in self.parameters():
-                if p.grad is not None:
-                    param_norm = p.grad.data.norm(2)
-                    total_norm += param_norm.item() ** 2
-            total_norm = total_norm ** 0.5
+            grad_norm_transformer = torch.nn.utils.clip_grad_norm_(transformer_params, float('inf'))
+            grad_norm_msaf = torch.nn.utils.clip_grad_norm_(msaf_params, float('inf'))
             
-            # 记录梯度信息
-            self.log('train/gradient_norm', total_norm)
-            
-            # 如果梯度过大，增加警告日志
-            if total_norm > 5.0:
-                warnings.warn(f"Gradient norm is too large: {total_norm}")"""
+            # 记录梯度范数
+            self.log('grad/norm_transformer', grad_norm_transformer, on_step=True, on_epoch=True)
+            self.log('grad/norm_msaf', grad_norm_msaf, on_step=True, on_epoch=True)

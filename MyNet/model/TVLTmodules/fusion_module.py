@@ -177,6 +177,21 @@ class MultiModalFusionEncoder(nn.Module):
                 nn.Dropout(dropout),
                 LayerNorm(hidden_size)
             )
+        elif fusion_type == 'gate':
+            # 为gate类型添加fusion_layer
+            self.fusion_layer = nn.Sequential(
+                nn.Linear(hidden_size * 2, hidden_size),  # 输入维度是当前状态和历史状态的拼接
+                nn.ReLU(),
+                nn.Linear(hidden_size, hidden_size),  # 输出维度与隐藏层大小相同，用于生成门控值
+                nn.Dropout(dropout)
+            )
+        elif fusion_type == 'add':
+            self.fusion_layer = nn.Sequential(
+                nn.Linear(hidden_size * 2, hidden_size),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                LayerNorm(hidden_size)
+            )
 
     def forward(self, x_in, x_in_k=None, x_in_v=None):
         """
@@ -240,10 +255,14 @@ class MultiModalFusionEncoder(nn.Module):
                         fused = torch.cat([x, avg_state], dim=-1)
                         x = self.fusion_layer(fused)
                     else:  # gate
-                        # 使用门控机制融合所有之前的状态
-                        all_states = torch.cat([x] + cross_attn_states[:-1], dim=-1)
-                        gate = torch.sigmoid(self.fusion_layer(all_states))
-                        x = gate * x + (1 - gate) * torch.mean(torch.stack(cross_attn_states[:-1]), dim=0)
+                        # 计算历史状态的平均值
+                        history_state = torch.mean(torch.stack(cross_attn_states[:-1]), dim=0)
+                        # 将当前状态和历史状态拼接
+                        concat_states = torch.cat([x, history_state], dim=-1)
+                        # 生成门控值
+                        gate = torch.sigmoid(self.fusion_layer(concat_states))
+                        # 使用门控机制融合当前状态和历史状态
+                        x = gate * x + (1 - gate) * history_state
             else:
                 # 自注意力处理（保持独立的逻辑）
                 residual = x

@@ -93,7 +93,7 @@ def main(_config):
         max_epochs=_config["max_epoch"],
         callbacks=callbacks,
         logger=logger,
-        # replace_sampler_ddp=False,           # 显式启用或禁用采样器替换。 如果没有指定这个使用 DDP 时会自动切换。
+        # replace_sampler_ddp=True,           # 显式启用或禁用采样器替换。 如果没有指定这个使用 DDP 时会自动切换。
         log_every_n_steps=10,   
         # flush_logs_every_n_steps=10,         # 将日志刷新到磁盘的频率（默认为每 100 步）
         # weights_summary="top",               # 训练开始时打印权重摘要
