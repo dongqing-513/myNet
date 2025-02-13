@@ -53,7 +53,7 @@ class Transformer(pl.LightningModule):
         # 特征网络：文本
         modalities = ('bert', 'visual', 'audio')
         # 加载bert和两层lstm的模型到model
-        model = text_lstm.BERTTextLSTMNet()
+        model = text_lstm.BERTTextLSTMNet(config=config)
         model_param = {
             'bert': {
                 'model': model,
@@ -367,7 +367,7 @@ class Transformer(pl.LightningModule):
             optimizer,
             num_warmup_steps=warmup_steps,
             num_training_steps=num_training_steps,
-            num_cycles=0.5  # 添加半个余弦周期
+            num_cycles=1.0  # 添加半个余弦周期
         )
         
         # 返回优化器和调度器配置
@@ -386,12 +386,12 @@ class Transformer(pl.LightningModule):
         # transformer部分
         transformer_params = [p for name, p in self.transformer.named_parameters() if p.requires_grad]
         if transformer_params:
-            torch.nn.utils.clip_grad_norm_(transformer_params, max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(transformer_params, max_norm=0.5)
         
         # msaf部分
         msaf_params = [p for name, p in self.msaf.named_parameters() if p.requires_grad]
         if msaf_params:
-            torch.nn.utils.clip_grad_norm_(msaf_params, max_norm=0.5)  # msaf使用更小的裁剪阈值
+            torch.nn.utils.clip_grad_norm_(msaf_params, max_norm=0.3)  # msaf使用更小的裁剪阈值
         
         # 记录梯度信息
         if self.training:

@@ -54,7 +54,7 @@ class BaseDataModule(LightningDataModule):
         tokenizer = _config["tokenizer"]
         self.tokenizer = get_pretrained_tokenizer(tokenizer)
         self.vocab_size = self.tokenizer.vocab_size
-        # self.bert_model = _config["bert_model"]
+        self.bert_model = _config["bert_model"]
 
         # 选择合适的数据整理器
         collator = (

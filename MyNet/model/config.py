@@ -22,7 +22,7 @@ def _loss_names(d):
     ret.update(d)
     return ret
 
-
+#Sacred要求所有配置项必须在基础配置函数（@ex.config）中定义默认值
 @ex.config
 def config():
     exp_name = "TVLT"
@@ -35,6 +35,7 @@ def config():
     max_text_len = 40
     draw_false_text = 0
     tokenizer = "bert-base-uncased" # tokenizer for text
+    bert_model = "bert-base-uncased" # bert model path
     vocab_size = 30522
     whole_word_masking = False
     mlm_prob = 0.15
@@ -74,16 +75,16 @@ def config():
     
     # Optimizer Setting
     optim_type = "adamw"
-    learning_rate = 1e-4      # 提高基础学习率，让TVLT能更好学习
-    weight_decay = 0.01       # 适当降低权重衰减
+    learning_rate = 5e-5      # 提高基础学习率，让TVLT能更好学习
+    weight_decay = 0.02       # 适当降低权重衰减
     decay_power = 1
     max_epoch = 20       # 增加训练轮数
     max_steps = 1000000
-    warmup_steps = 2000      # 增加预热步数
-    warmup_ratio = 0.05      # 降低预热比例，更平缓的开始
+    warmup_steps = 3000      # 增加预热步数
+    warmup_ratio = 0.1      # 降低预热比例，更平缓的开始
     beta1 = 0.9
-    beta2 = 0.999            # 使用更标准的beta2值
-    eps = 1e-8
+    beta2 = 0.98            # 使用更标准的beta2值
+    eps = 1e-6
     
     # 学习率调度器设置
     lr_scheduler = "cosine_warmup"
@@ -149,7 +150,7 @@ def task_cls_moseiemo():
     learning_rate = 1e-4
     max_epoch = 10
     
-
+# 在具体的任务配置（如task_cls_mosei）中可以覆盖这个默认值
 @ex.named_config
 def task_cls_mosei():
     exp_name = "cls_mosei"
@@ -184,8 +185,9 @@ def task_cls_mosei():
     #skip_connection_type = "concat"  # Options: concat, add, gate
     
     tokenizer = "/home/mz/demo/MyNet/mybert/models--bert-base-uncased"
-    # bert_model = "/home/mz/demo/MyNet/bert"
-    # 词汇表的大小。可以识别的不同单词或标记的总数。表示模型的词汇表中有 768 个不同的元素。
+    bert_model = "/home/mz/demo/MyNet/bert"
+    
+    # 词汇表的大小。可以识别的不同单词或标记的总数。
     vocab_size = 30522
     # 输入文本的最大长度。如果文本长度超过这个值，可能会被截断。表示最长的文本长度为 768 个标记或字符。
     max_text_len = 197 # 512 (audio patch size (2,128))225 78 220

@@ -73,10 +73,8 @@ class MSAFLSTMNet(nn.Module):
 
         # 文本模型层
         if "bert" in _config:
-            # 获取文本模型
-            text_model = _config["bert"]["model"]
-            # 进行文本特征提取：Bert+两层lstm 
-            self.text_model = BERTTextLSTMNet()
+            # 进行文本特征提取：Bert+优化的LSTM架构
+            self.text_model = BERTTextLSTMNet(config=_config)
             # 填充文本id
             self.text_id = _config["bert"]["id"]
 

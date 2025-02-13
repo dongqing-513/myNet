@@ -21,11 +21,15 @@ nohup python ./run.py with data_root='/home/mz/demo/TVLT/Dataset/cmumosei/' \
   load_local_path='/home/mz/demo/MyNet/TVLT-MOSEI-SA.ckpt'  > 0126fordataloader.log 2>&1 &
 
 nohup python ./run.py with data_root='/home/mz/demo/TVLT/Dataset/cmumosei/' \
-  task_cls_mosei num_workers=16 \
-  val_check_interval=0.5 warmup_steps=2000 max_epoch=10  \
+  task_cls_mosei num_workers=4 per_gpu_batchsize=1\
+  val_check_interval=0.5 warmup_steps=3000 max_epoch=10  \
   gpus=2 tokenizer='/home/mz/demo/MyNet/bert' log_dir='/home/mz/demo/MyNet/tensorboardlog' \
-  load_local_path='/home/mz/demo/MyNet/TVLT-MOSEI-SA.ckpt'  > 0128foroptimize.log 2>&1 &
+  load_local_path='/home/mz/demo/MyNet/TVLT-MOSEI-SA.ckpt'  > 0211fortextlstm.log 2>&1 &
 
-watch 'tail -n5 0128foroptimize.log'
+watch 'tail -n5 0211fortextlstm.log'
 
 nvidia-smi
+
+# 清理临时文件
+rm -rf /tmp/pymp-*
+rm -rf /tmp/tmp*
