@@ -140,10 +140,16 @@ class Transformer(pl.LightningModule):
         use_mae=False        # 是否使用掩码自编码器
     ):
         """
-    推断函数，根据输入的批次数据进行推理。
-    返回值：
-    - ret：包含推理结果的字典，包括文本特征、音频特征、视频特征等。
-    """
+        推断函数，根据输入的批次数据进行推理。
+        
+        处理流程：
+        1. 提取文本、音频、视频特征
+        2. 使用transformer处理音视频特征
+        3. 使用msaf进行多模态融合
+        
+        返回值：
+        - ret：包含推理结果的字典
+        """
         
         # 根据 mask_text 的值确定是否在文本键后添加 "_mlm"
         do_mlm = "_mlm" if mask_text else ""        
@@ -186,34 +192,24 @@ class Transformer(pl.LightningModule):
         text_feats, audio_feats, video_feats = None, None, None
         audio_labels_mlm = video_labels_mlm = None
 
-        # cls_feats, audio_feats, video_feats, text_feats, audio_masks, video_masks = \
-        #     self.transformer(text_ids=text_ids, text_masks=text_masks, audio=audio,
-        #                      audio_masks=audio_masks, video=video, video_masks=video_masks,
-        #                      mask_visual=mask_visual, use_mae=use_mae)
-        
-        # 特征网络：使用tvlt的读取音视频， 并通过一个encoder
-        # model_type='mae_vit_base_patch16_dec512d8b' 
-        # self.transformer = TVLT( 
-                # patch_size=16, audio_patch_size=[16, 16], embed_dim=768, depth=12, num_heads=12,
-                # decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                # mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        # 1. 使用transformer提取音视频特征
         av = self.transformer(text_ids=text_ids, text_masks=text_masks, audio=audio,
                              audio_masks=audio_masks, video=video, video_masks=video_masks,
                              mask_visual=mask_visual, use_mae=use_mae)
-        # torch.Size([1, 1801, 768])
+
+        # 2. 使用msaf进行多模态融合
+        # msaf包含：
+        # - BERT+LSTM处理文本
+        # - 多模态特征融合
+        text_tokens = batch[txtkey][0]  # 原始文本tokens
+        attention_mask = batch['attention_mask'][0]  # 文本的attention mask，需要取[0]因为是batch数据
+        hidden_size = self.msaf(av, text_tokens, attention_mask) 
         
-        hidden_size = self.msaf(av, batch[txtkey][0],batch['attention_mask'][0]) 
-        # self.msaf.forward(av, batch[txtkey][0])
-        
-        
-        cls_feats = 0
-        # 创建并返回包含各种特征和数据的字典
+        # 3. 返回所有需要的特征和输出
         ret = {
             "text_feats": text_feats,
             "audio_feats": audio_feats,
             "video_feats": video_feats,
-            "text_feats": text_feats,
-            "cls_feats": cls_feats,
             "video_masks": video_masks,
             "video": video,
             "audio_masks": audio_masks,
@@ -259,25 +255,33 @@ class Transformer(pl.LightningModule):
 
         return ret
 
-    def training_step(self, batch, batch_idx):    
-        model_utils.set_task(self)     
-        output = self(batch)
-        total_loss = sum([v for k, v in output.items() if "loss" in k and isinstance(v, torch.Tensor)]) 
-        self.log("train/total_loss", total_loss)
-        """
-        # 检查损失值并调整学习率 当损失值上升时，将学习率乘以0.95
-        if hasattr(self, 'previous_loss') and total_loss > self.previous_loss:
-            current_lr = self.learning_rate * self.lr_decay
-            self.learning_rate = current_lr
-            # 更新优化器的学习率
-            for param_group in self.trainer.optimizers[0].param_groups:
-                param_group['lr'] = current_lr
-            self.log("train/learning_rate", current_lr)
+    def training_step(self, batch, batch_idx):
+        """训练步骤
         
-        self.previous_loss = total_loss
+        职责：
+        1. 获取模型输出
+        2. 记录日志
+        3. 返回损失（损失计算在objectives.py中）
+        
+        参数：
+            batch: 输入的数据批次
+            batch_idx: 批次索引
+            
+        返回：
+            total_loss: 计算得到的总损失
         """
+        # 1. 获取模型输出
+        ret = self(batch)  # 这会调用forward，进而调用objectives.compute_mosei
+        
+        # 2. 获取损失
+        # 在mosei任务中，objectives.compute_mosei已经计算了损失
+        # ret中应该包含"mosei_loss"
+        total_loss = ret["mosei_loss"]
+        
+        # 3. 记录日志
+        self.log("train/total_loss", total_loss)
+        
         return total_loss
-    
     
     # 用于在每个 epoch 结束时进行一些清理、统计或其他与模型训练相关的操作。可能包括更新指标、保存中间结果、重置某些状态变量等。
     # def training_epoch_end(self, outs):

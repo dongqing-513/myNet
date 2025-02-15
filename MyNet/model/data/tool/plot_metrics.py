@@ -4,7 +4,7 @@ import numpy as np
 from math import ceil
 
 
-png_name = 'metrics_plot0211.png'
+png_name = 'metrics_plot0214.png'
 
 
 def extract_metrics(log_file):
@@ -152,7 +152,7 @@ def plot_metrics(epochs, val_metrics, losses, f1_metrics):
 
 
 def main():
-    log_file = '/home/mz/demo/MyNet/0211fortextlstm.log'
+    log_file = '/home/mz/demo/MyNet/ckp/0214fortextlstmandmask.log'
     print("正在从日志文件中提取指标...")
     epochs, val_metrics, losses, f1_metrics = extract_metrics(log_file)
 
