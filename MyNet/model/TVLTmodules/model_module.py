@@ -41,7 +41,7 @@ class Transformer(pl.LightningModule):
         self.fusion_type= config['fusion_type']       # 融合类型
         self.drop_rate= config['drop_rate']       # dropout率
         self.normalize_before= config['normalize_before']       # 是否在前面进行归一化
-        
+
         # 特征网络：使用tvlt的读取音视频， 并通过一个encoder
         # model_type='mae_vit_base_patch16_dec512d8b'
         self.transformer = getattr(tvlt, config["model_type"])(config=config)
@@ -49,7 +49,7 @@ class Transformer(pl.LightningModule):
         #         patch_size=16, audio_patch_size=[16, 16], embed_dim=768, depth=12, num_heads=12,
         #         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         #         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-        
+
         # 特征网络：文本
         modalities = ('bert', 'visual', 'audio')
         # 加载bert和两层lstm的模型到model
@@ -73,11 +73,11 @@ class Transformer(pl.LightningModule):
             'drop_rate': self.drop_rate,
             'normalize_before': self.normalize_before
         }
-        
+
         # 文本特征 + 融合网络
         self.msaf = msaf.MSAFLSTMNet(model_param)
-        
-        
+
+
         # 保存超参数
         self.save_hyperparameters()
         # 设置模型的评估指标
@@ -93,16 +93,16 @@ class Transformer(pl.LightningModule):
         if config["load_local_path"]:
             print(f"Loading checkpoint from {config['load_local_path']}")
             state_dict = torch.load(config["load_local_path"], map_location="cpu", weights_only=True)
-            
+
             # 打印权重文件的键
             # print("Keys in checkpoint:", state_dict.keys())
-            
+
             if "model" in state_dict.keys():
                 # 是否严格加载，要求预训练模型和当前模型的结构完全一致
-                state_dict = state_dict["model"]         
+                state_dict = state_dict["model"]
             elif "state_dict" in state_dict.keys():
                 state_dict = state_dict['state_dict']
-            
+
             # 检查关键层的权重是否存在
             key_layers = ['classifier.0.dense.weight', 'classifier.1.weight', 'classifier.2.weight', 'classifier.4.weight']
             for key in key_layers:
@@ -110,14 +110,14 @@ class Transformer(pl.LightningModule):
                     print(f"Found {key} in checkpoint, shape:", state_dict[key].shape)
                 else:
                     print(f"Warning: {key} not found in checkpoint")
-            
+
             # 加载权重并捕获任何不匹配
             try:
                 self.load_state_dict(state_dict, strict=config['strict_load'])
                 print("Successfully loaded checkpoint")
             except Exception as e:
                 print("Error loading checkpoint:", str(e))
-            
+
         if config["load_hub_path"]:
             ckpt_path = load_from_hub(repo_id="TVLT/models", filename=config["load_hub_path"])
             self.transformer.load_state_dict(torch.load(ckpt_path), strict=config['strict_load'])
@@ -141,30 +141,30 @@ class Transformer(pl.LightningModule):
     ):
         """
         推断函数，根据输入的批次数据进行推理。
-        
+
         处理流程：
         1. 提取文本、音频、视频特征
         2. 使用transformer处理音视频特征
         3. 使用msaf进行多模态融合
-        
+
         返回值：
         - ret：包含推理结果的字典
         """
-        
+
         # 根据 mask_text 的值确定是否在文本键后添加 "_mlm"
-        do_mlm = "_mlm" if mask_text else ""        
+        do_mlm = "_mlm" if mask_text else ""
         videokey = "video_data"
         audiokey = "audio_data"
         txtkey   = "txt_data"   # our_00
         textkey = "text_ids"+do_mlm
-        
+
         # 判断批次数据中是否包含音频和视频键
         use_audio = audiokey in list(batch.keys())
-        use_video = videokey in list(batch.keys())                
+        use_video = videokey in list(batch.keys())
         has_text = textkey in list(batch.keys())
-        
+
         # 如果有文本数据
-        if has_text:    
+        if has_text:
             text_ids = batch[f"text_ids{do_mlm}"]
             text_labels = batch[f"text_labels{do_mlm}"]
             text_masks = batch[f"text_masks"]
@@ -173,10 +173,10 @@ class Transformer(pl.LightningModule):
         else:
             text_ids = None
             text_labels = None
-            text_masks = None 
+            text_masks = None
             text_embeds = None
             text_labels_mlm = None
-        
+
         # 如果有音频数据，则从批次中获取音频数据，否则设置为 None
         if use_audio:
             audio = batch[audiokey]
@@ -185,10 +185,10 @@ class Transformer(pl.LightningModule):
 
         # 如果有视频数据，则从批次中获取视频数据，否则设置为 None
         if use_video:
-            video = batch[videokey] 
+            video = batch[videokey]
         else:
             video = None
-                      
+
         text_feats, audio_feats, video_feats = None, None, None
         audio_labels_mlm = video_labels_mlm = None
 
@@ -203,8 +203,8 @@ class Transformer(pl.LightningModule):
         # - 多模态特征融合
         text_tokens = batch[txtkey][0]  # 原始文本tokens
         attention_mask = batch['attention_mask'][0]  # 文本的attention mask，需要取[0]因为是batch数据
-        hidden_size = self.msaf(av, text_tokens, attention_mask) 
-        
+        hidden_size = self.msaf(av, text_tokens, attention_mask)
+
         # 3. 返回所有需要的特征和输出
         ret = {
             "text_feats": text_feats,
@@ -231,25 +231,25 @@ class Transformer(pl.LightningModule):
             return ret
 
         # 根据当前任务列表进行不同的计算和更新结果字典
-            
+
         # Masked Language Modeling
         if "mlm" in self.current_tasks:
             ret.update(objectives.compute_mlm(self, batch))
 
         if "mae_audio" in self.current_tasks and "mae_video" in self.current_tasks:
-            ret.update(objectives.compute_mae_joint(self, batch, self.patch_size, self.audio_patch_size))       
-        
+            ret.update(objectives.compute_mae_joint(self, batch, self.patch_size, self.audio_patch_size))
+
         # Masked Patch Prediction
         elif "mae_audio" in self.current_tasks:
             ret.update(objectives.compute_mae_audio(self, batch, self.audio_patch_size))
-            
+
         elif "mae_video" in self.current_tasks:
             ret.update(objectives.compute_mae_video(self, batch, self.patch_size))
-        
+
         # 会用到，在每次训练开始前自动加载dataloader
         if "mosei" in self.current_tasks:
             ret.update(objectives.compute_mosei(self, batch))
-            
+
         if "moseiemo" in self.current_tasks:
             ret.update(objectives.compute_moseiemo(self, batch))
 
@@ -257,32 +257,42 @@ class Transformer(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         """训练步骤
-        
+
         职责：
         1. 获取模型输出
         2. 记录日志
         3. 返回损失（损失计算在objectives.py中）
-        
+
         参数：
             batch: 输入的数据批次
             batch_idx: 批次索引
-            
+
         返回：
             total_loss: 计算得到的总损失
         """
         # 1. 获取模型输出
-        ret = self(batch)  # 这会调用forward，进而调用objectives.compute_mosei
-        
+        model_utils.set_task(self)
+        output = self(batch)  # 这会调用forward，进而调用objectives.compute_mosei
+
         # 2. 获取损失
-        # 在mosei任务中，objectives.compute_mosei已经计算了损失
-        # ret中应该包含"mosei_loss"
-        total_loss = ret["mosei_loss"]
-        
+        total_loss = sum([v for k, v in output.items() if "loss" in k and isinstance(v, torch.Tensor)])
+
         # 3. 记录日志
         self.log("train/total_loss", total_loss)
-        
+        """
+        # 检查损失值并调整学习率 当损失值上升时，将学习率乘以0.95
+        if hasattr(self, 'previous_loss') and total_loss > self.previous_loss:
+            current_lr = self.learning_rate * self.lr_decay
+            self.learning_rate = current_lr
+            # 更新优化器的学习率
+            for param_group in self.trainer.optimizers[0].param_groups:
+                param_group['lr'] = current_lr
+            self.log("train/learning_rate", current_lr)
+
+        self.previous_loss = total_loss
+        """
         return total_loss
-    
+
     # 用于在每个 epoch 结束时进行一些清理、统计或其他与模型训练相关的操作。可能包括更新指标、保存中间结果、重置某些状态变量等。
     # def training_epoch_end(self, outs):
     def on_train_epoch_end(self):
@@ -290,9 +300,9 @@ class Transformer(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         model_utils.set_task(self)
-        output = self(batch) 
-        
-    def on_validation_epoch_end(self):   
+        output = self(batch)
+
+    def on_validation_epoch_end(self):
         model_utils.epoch_wrapup(self)  # 在验证步骤结束时调用 epoch_wrapup
 
     def test_step(self, batch, batch_idx):
@@ -317,42 +327,42 @@ class Transformer(pl.LightningModule):
     def configure_optimizers(self):
         # 为不同组件创建不同的参数组
         no_decay = ["bias", "LayerNorm.weight"]
-        
+
         # Transformer参数组
         transformer_params = [
             {
-                "params": [p for n, p in self.transformer.named_parameters() 
+                "params": [p for n, p in self.transformer.named_parameters()
                           if not any(nd in n for nd in no_decay)],
                 "weight_decay": self.weight_decay,
                 "lr": self.learning_rate
             },
             {
-                "params": [p for n, p in self.transformer.named_parameters() 
+                "params": [p for n, p in self.transformer.named_parameters()
                           if any(nd in n for nd in no_decay)],
                 "weight_decay": 0.0,
                 "lr": self.learning_rate
             }
         ]
-        
+
         # MSAF参数组 - 使用较小的学习率
         msaf_params = [
             {
-                "params": [p for n, p in self.msaf.named_parameters() 
+                "params": [p for n, p in self.msaf.named_parameters()
                           if not any(nd in n for nd in no_decay)],
                 "weight_decay": self.weight_decay,
                 "lr": self.learning_rate * 0.1  # MSAF使用较小的学习率
             },
             {
-                "params": [p for n, p in self.msaf.named_parameters() 
+                "params": [p for n, p in self.msaf.named_parameters()
                           if any(nd in n for nd in no_decay)],
                 "weight_decay": 0.0,
                 "lr": self.learning_rate * 0.1
             }
         ]
-        
+
         # 合并所有参数组
         optimizer_grouped_parameters = transformer_params + msaf_params
-        
+
         # 使用AdamW优化器，添加梯度裁剪
         optimizer = AdamW(
             optimizer_grouped_parameters,
@@ -361,11 +371,11 @@ class Transformer(pl.LightningModule):
             betas=(0.9, 0.999),
             weight_decay=self.weight_decay,
         )
-        
+
         # 计算训练步数
         num_training_steps = self.max_steps
         warmup_steps = self.warmup_steps
-        
+
         # 使用分段余弦学习率调度器
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
@@ -373,7 +383,7 @@ class Transformer(pl.LightningModule):
             num_training_steps=num_training_steps,
             num_cycles=1.0  # 添加半个余弦周期
         )
-        
+
         # 返回优化器和调度器配置
         return {
             "optimizer": optimizer,
@@ -391,18 +401,18 @@ class Transformer(pl.LightningModule):
         transformer_params = [p for name, p in self.transformer.named_parameters() if p.requires_grad]
         if transformer_params:
             torch.nn.utils.clip_grad_norm_(transformer_params, max_norm=0.5)
-        
+
         # msaf部分
         msaf_params = [p for name, p in self.msaf.named_parameters() if p.requires_grad]
         if msaf_params:
             torch.nn.utils.clip_grad_norm_(msaf_params, max_norm=0.3)  # msaf使用更小的裁剪阈值
-        
+
         # 记录梯度信息
         if self.training:
             # 计算梯度范数
             grad_norm_transformer = torch.nn.utils.clip_grad_norm_(transformer_params, float('inf'))
             grad_norm_msaf = torch.nn.utils.clip_grad_norm_(msaf_params, float('inf'))
-            
+
             # 记录梯度范数
             self.log('grad/norm_transformer', grad_norm_transformer, on_step=True, on_epoch=True)
             self.log('grad/norm_msaf', grad_norm_msaf, on_step=True, on_epoch=True)

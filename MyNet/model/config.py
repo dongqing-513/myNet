@@ -40,7 +40,7 @@ def config():
     whole_word_masking = False
     mlm_prob = 0.15
     use_text = False
-    
+
     # Video setting
     video_size = 224 # video frame reshape size
     draw_false_video = 0 # draw negative video for video-audio matching
@@ -48,7 +48,7 @@ def config():
     max_frames = 64 # max frames of frame position embedding
     num_frames = 8 # number frames to use for input video
     use_video = True
-    
+
     # Audio Setting
     audio_size = 1024 # max audio spectrogram
     frequency_size = 128 # frequency axis size
@@ -72,50 +72,50 @@ def config():
     fusion_type = str('concat')  # 融合方式：'concat', 'add', 'gate'
     skip_interval = int(1)  # 跳跃连接间隔，每隔几层添加一次跳跃连接
     normalize_before = bool(True)  # 是否在attention和FFN之前进行归一化
-    
+
     # Optimizer Setting
     optim_type = "adamw"
-    learning_rate = 5e-5      # 提高基础学习率，让TVLT能更好学习
-    weight_decay = 0.02       # 适当降低权重衰减
+    learning_rate = 3e-5       # 降低基础学习率，避免训练不稳定
+    weight_decay = 0.01        # 增加权重衰减，更好的正则化
     decay_power = 1
-    max_epoch = 20       # 增加训练轮数
+    max_epoch = 15            # 适当增加训练轮数
     max_steps = 1000000
-    warmup_steps = 3000      # 增加预热步数
-    warmup_ratio = 0.1      # 降低预热比例，更平缓的开始
+    warmup_steps = 2000       # 减少预热步数
+    warmup_ratio = 0.05       # 降低预热比例，更快进入正常训练
     beta1 = 0.9
-    beta2 = 0.98            # 使用更标准的beta2值
-    eps = 1e-6
-    
+    beta2 = 0.999             # 使用更保守的beta2值
+    eps = 1e-8                # 提高数值稳定性
+
     # 学习率调度器设置
     lr_scheduler = "cosine_warmup"
-    min_lr_ratio = 0.001     # 降低最小学习率比例，避免后期学习停滞
-    
+    min_lr_ratio = 0.01       # 提高最小学习率比例，避免后期学习过慢
+
     # Dropout和正则化设置
-    attention_dropout = 0.1   # 降低dropout率，因为模型较大
-    hidden_dropout = 0.1
-    drop_rate = 0.1          # 统一降低dropout率
-    
+    attention_dropout = 0.15    # 增加dropout率，增强正则化
+    hidden_dropout = 0.15
+    drop_rate = 0.15           # 统一增加dropout率
+
     # 模型结构设置
     fusion_type = 'concat'     # 使用门控机制进行特征融合
     skip_interval = 2        # 增加跳跃连接间隔
     normalize_before = True   # 保持在attention和FFN之前进行归一化
-    
+
     # 梯度裁剪
-    gradient_clip_val = 1.0   # 对TVLT使用较大的裁剪阈值
-    gradient_clip_val_msaf = 0.5  # 对MSAF使用较小的裁剪阈值
-    
+    gradient_clip_val = 0.5     # 使用更保守的梯度裁剪
+    gradient_clip_val_msaf = 0.3  # 对MSAF使用更小的裁剪阈值
+
     # 早停设置
     early_stopping_patience = 5    # 减少耐心值，及时停止过拟合
     early_stopping_min_delta = 0.001  # 添加最小改善阈值
-    
+
     # 验证设置
     val_check_interval = 0.5  # 增加验证频率
-    
+
     # 批次设置
-    accumulate_grad_batches = 16  # 使用梯度累积来模拟大批次
-    
+    accumulate_grad_batches = 32   # 增加梯度累积来模拟更大批次
+
     # Downstream Setting
-    vqav2_label_size = 3129 
+    vqav2_label_size = 3129
     get_va_recall_metric = False # perform audio video retrieval at end of each epoch
 
     # PL Trainer Setting
@@ -134,7 +134,7 @@ def config():
     load_hub_path = ""
     num_workers = 16
 
-    
+
 @ex.named_config
 def task_cls_moseiemo():
     exp_name = "cls_moseiemo"
@@ -145,11 +145,11 @@ def task_cls_moseiemo():
     audio_size = 1024
     num_frames = 8
     use_video = True
-    use_audio = True 
+    use_audio = True
     use_text = False
     learning_rate = 1e-4
     max_epoch = 10
-    
+
 # 在具体的任务配置（如task_cls_mosei）中可以覆盖这个默认值
 @ex.named_config
 def task_cls_mosei():
@@ -157,36 +157,27 @@ def task_cls_mosei():
     datasets = ["mosei"]
     loss_names = _loss_names({"mosei": 1})
     model_type= 'mae_vit_base_patch16_dec512d8b' # for32'mae_vit_base_patch16_dec512d8b'
-    
+
     # 当前值：128
     # 建议调整为64，减小批量大小可以提高模型泛化能力，避免后期过拟合
     batch_size = 64
-    
+
     audio_size = 1024
-    
+
     # 增加视频帧数以捕获更多时序信息，提高情感分析准确性
     num_frames = 8
-    
+
     use_video = True
-    use_audio = True 
+    use_audio = True
     use_text = True
-    
-    # 当前值：1e-4
-    # 建议调整为5e-5，降低学习率可以使模型更稳定地收敛，避免后期震荡
-    learning_rate = 5e-5
-    
-    # 当前值：10
-    # 建议调整为15，增加训练轮次配合较小的学习率，使模型更充分学习
-    max_epoch = 10
-    
-    # Cross-modal skip connections configuration
-    # use_skip_connections = True
-    skip_interval = 2  # 跳跃连接间隔，每隔几层添加一次跳跃连接
-    #skip_connection_type = "concat"  # Options: concat, add, gate
-    
+
+    learning_rate = 3e-5       # 使用更保守的学习率
+    max_epoch = 15             # 增加训练轮数
+
+    skip_interval = 2
     tokenizer = "/home/mz/demo/MyNet/mybert/models--bert-base-uncased"
     bert_model = "/home/mz/demo/MyNet/bert"
-    
+
     # 词汇表的大小。可以识别的不同单词或标记的总数。
     vocab_size = 30522
     # 输入文本的最大长度。如果文本长度超过这个值，可能会被截断。表示最长的文本长度为 768 个标记或字符。
@@ -211,7 +202,7 @@ def task_finetune_vqa():
     audio_size = 1024
     num_frames = 1
     use_video = True
-    use_audio = True 
+    use_audio = True
     use_text = False
     learning_rate = 1e-5
     max_epoch = 10
@@ -226,15 +217,15 @@ def task_finetune_msrvtt():
     audio_size = 1024
     num_frames = 8
     use_video = True
-    use_audio = True 
+    use_audio = True
     use_text = False
     get_va_recall_metric = True
     draw_false_video = 23
     learning_rate = 1e-5
     max_epoch = 40
     max_steps = 100000  # 改为整数形式
-    
-    
+
+
 @ex.named_config
 def task_mae_vam():
     exp_name = "mae_vam"
@@ -244,11 +235,9 @@ def task_mae_vam():
     audio_size = 1024
     num_frames = 4
     use_video = True
-    use_audio = True 
+    use_audio = True
     use_text = False
-    draw_false_video = 1 
+    draw_false_video = 1
     use_mae = True
     learning_rate = 1e-5
     max_epoch = 100
-    
-   

@@ -16,13 +16,13 @@ class MSAFLSTMNet(nn.Module):
         super(MSAFLSTMNet, self).__init__()
 
         self.max_feature_layers = 1  # number of layers in unimodal models before classifier
-        
+
         # NFHNET语音和视频模型层 低阶视频音频模态聚合模块
         # self.audio_visual_model = BottleAttentionNet()
 
         self.embed_dim = _config["hidden_size"]  # 使用_config获取参数
         # 交叉注意力
-        
+
         self.cross_transformer = MultiModalFusionEncoder(
             hidden_size=self.embed_dim,
             num_heads=_config['num_heads'],
@@ -40,15 +40,15 @@ class MSAFLSTMNet(nn.Module):
         """
         self.cross_transformer = TransformerEncoder(
             embed_dim=self.embed_dim,
-            num_heads=8, 
-            layers=4, 
+            num_heads=8,
+            layers=4,
             attn_dropout = 0.4,
             attn_mask=False
         )"""
-        
-        
+
+
         # 自注意力
-        
+
         self.classifcation = MultiModalFusionEncoder(
             hidden_size=self.embed_dim,
             num_heads=_config['num_heads'],
@@ -66,8 +66,8 @@ class MSAFLSTMNet(nn.Module):
         """
         self.classifcation = TransformerEncoder(
             embed_dim=self.embed_dim,
-            num_heads=8, 
-            layers=4, 
+            num_heads=8,
+            layers=4,
             attn_mask=False
         )"""
 
@@ -87,8 +87,109 @@ class MSAFLSTMNet(nn.Module):
         # 归一化
         self.layer_norm = nn.LayerNorm(self.embed_dim)
 
-        # 特征维度 [1, 220, 768]
-        
+        # 是否使用轻量级序列长度对齐模块
+        self.use_lightweight = True  # 设置为False则使用原始实现
+
+        # ====== 原始序列长度对齐模块 ======
+        self.length_adapt = nn.ModuleList([
+            nn.Sequential(
+                # 第一层：1576 -> 394
+                nn.Conv1d(
+                    in_channels=self.embed_dim,
+                    out_channels=self.embed_dim,
+                    kernel_size=4,
+                    stride=4,
+                    padding=0
+                ),
+                nn.GELU(),
+                nn.Dropout(0.1)
+            ),
+            nn.Sequential(
+                # 第二层：394 -> 197
+                nn.Conv1d(
+                    in_channels=self.embed_dim,
+                    out_channels=self.embed_dim,
+                    kernel_size=2,
+                    stride=2,
+                    padding=0
+                ),
+                nn.GELU(),
+                nn.Dropout(0.1)
+            )
+        ])
+
+        # 原始特征归一化层
+        self.layer_norms = nn.ModuleList([
+            nn.LayerNorm(self.embed_dim),
+            nn.LayerNorm(self.embed_dim)
+        ])
+
+        # ====== 轻量级序列长度对齐模块 ======
+        if self.use_lightweight:
+            # 1. 特征增强卷积
+            self.feature_enhance = nn.ModuleList([
+                nn.Sequential(
+                    # 第一层：增强局部特征，不改变序列长度
+                    nn.Conv1d(self.embed_dim, self.embed_dim,
+                             kernel_size=3, stride=1, padding=1, groups=8),
+                    nn.GELU(),
+                    nn.Dropout(0.1)
+                ),
+                nn.Sequential(
+                    # 第二层：增强局部特征，不改变序列长度
+                    nn.Conv1d(self.embed_dim, self.embed_dim,
+                             kernel_size=3, stride=1, padding=1, groups=8),
+                    nn.GELU(),
+                    nn.Dropout(0.1)
+                )
+            ])
+
+            # 2. 高效池化层
+            self.pool_layers = nn.ModuleList([
+                nn.Sequential(
+                    # 第一次降采样：1576 -> 394
+                    nn.AvgPool1d(kernel_size=4, stride=4),
+                    nn.BatchNorm1d(self.embed_dim)
+                ),
+                nn.Sequential(
+                    # 第二次降采样：394 -> 197
+                    nn.AvgPool1d(kernel_size=2, stride=2),
+                    nn.BatchNorm1d(self.embed_dim)
+                )
+            ])
+
+            # 3. 残差连接
+            self.skip_connections = nn.ModuleList([
+                nn.Sequential(
+                    nn.Conv1d(self.embed_dim, self.embed_dim,
+                             kernel_size=1, stride=4),
+                    nn.BatchNorm1d(self.embed_dim)
+                ),
+                nn.Sequential(
+                    nn.Conv1d(self.embed_dim, self.embed_dim,
+                             kernel_size=1, stride=2),
+                    nn.BatchNorm1d(self.embed_dim)
+                )
+            ])
+
+            # 4. 特征重校准
+            self.channel_se = nn.ModuleList([
+                nn.Sequential(
+                    nn.AdaptiveAvgPool1d(1),
+                    nn.Conv1d(self.embed_dim, self.embed_dim // 4, 1),
+                    nn.ReLU(inplace=True),
+                    nn.Conv1d(self.embed_dim // 4, self.embed_dim, 1),
+                    nn.Sigmoid()
+                ),
+                nn.Sequential(
+                    nn.AdaptiveAvgPool1d(1),
+                    nn.Conv1d(self.embed_dim, self.embed_dim // 4, 1),
+                    nn.ReLU(inplace=True),
+                    nn.Conv1d(self.embed_dim // 4, self.embed_dim, 1),
+                    nn.Sigmoid()
+                )
+            ])
+
         # 多种池化策略
         self.global_pool = nn.AdaptiveAvgPool2d((1, 768))  # 全局平均池化
         self.attention_pool = nn.Sequential(
@@ -98,7 +199,7 @@ class MSAFLSTMNet(nn.Module):
             nn.Linear(128, 1),
             nn.Softmax(dim=1)
         )
-        
+
         # 6分类任务 - 使用预训练权重
         self.classifier = nn.ModuleList([
             nn.Sequential(OrderedDict([
@@ -109,7 +210,7 @@ class MSAFLSTMNet(nn.Module):
             nn.Identity(),
             nn.Linear(self.embed_dim * 2, 6)
         ])
-        
+
         # 2分类任务 - 独立的分类器
         self.binary_classifier = nn.Sequential(
             # 特征转换层
@@ -117,120 +218,143 @@ class MSAFLSTMNet(nn.Module):
             nn.LayerNorm(1024),
             nn.GELU(),
             nn.Dropout(0.1),
-            
+
             # 中间层
             nn.Linear(1024, 512),
             nn.LayerNorm(512),
             nn.GELU(),
             nn.Dropout(0.1),
-            
+
             # 输出层
             nn.Linear(512, 1),
             nn.Tanh()
         )
 
+        # 改进1: 特征缩放层
+        self.modality_weights = nn.Parameter(torch.ones(3))  # 学习不同模态的权重
+
+        # 改进2: 位置编码
+        self.pos_encoder = nn.Parameter(torch.zeros(1, 512, self.embed_dim))
+        nn.init.normal_(self.pos_encoder, mean=0, std=0.02)
+
+        # 改进3: 分层池化
+        self.hierarchical_pool = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv1d(self.embed_dim, self.embed_dim, kernel_size=3, stride=2, padding=1),
+                nn.LayerNorm([self.embed_dim]),
+                nn.GELU()
+            ) for _ in range(3)
+        ])
+
+        # 改进4: 特征重校准
+        self.se_module = nn.Sequential(
+            nn.AdaptiveAvgPool1d(1),
+            nn.Linear(self.embed_dim, self.embed_dim // 16),
+            nn.ReLU(),
+            nn.Linear(self.embed_dim // 16, self.embed_dim),
+            nn.Sigmoid()
+        )
+
+        # 改进5: 多头注意力池化
+        self.multihead_pool = nn.MultiheadAttention(
+            embed_dim=self.embed_dim,
+            num_heads=8,
+            dropout=_config['drop_rate']
+        )
+
 
     def forward(self, av, txt, attention_mask):
-        # txt已经通过BertTokenizer，,得到torch.Size([1, 512])
-        # av已经通过一次transformer
-
         for i in range(self.max_feature_layers):
-            # 处理文本数据，依次通过bert和两个lstm
             if hasattr(self, "text_id"):
-                txt = self.text_model(txt,attention_mask)
-                # print(f"\ntxt LSTM output sequence length: {txt.shape[1]}")
-                # torch.Size([1, 512, 768])print(f"\nLSTM output dimension: {txt.shape}")
-                
-            # NFHNET语音和视频模型层
-            # old：audio_visual_feature = self.audio_visual_model(x[self.audio_id], x[self.visual_id])
-            audio_visual_feature = av
-            # print("\nav.shape:",av.shape)
-            # TODO: 交叉注意力需要多模态之间bath_size num_of_tokens dim维度一致，现在图片音频的融合维度远大于文本序列长度
-            #       如何缩短av序列长度或增大文本序列长度            
-            # av : ([1, 1801, 768]) bath_size num_of_tokens dim
-            # 经过平均池化调整维度 
-            # Selecting torch.Size([1, 512, 768])
-            # audio_visual_feature = audio_visual_feature[:, :512, :]
-            # av；Layer normalization
-            # 处理音视频特征维度
-            # 使用平均池化减少序列长度，从1801降到225（1801/8≈225）
-            pool = nn.AvgPool1d(kernel_size=8, stride=8)
-            # 转置以适应池化层的输入要求 [batch, seq_len, dim] -> [batch, dim, seq_len]
-            audio_visual_feature = audio_visual_feature.transpose(1, 2)
-            # print("\naudio_visual_feature:",audio_visual_feature.shape)
-            # 应用池化
-            audio_visual_feature = pool(audio_visual_feature)
-            # 转置回原来的格式 [batch, dim, seq_len] -> [batch, seq_len, dim]
-            audio_visual_feature = audio_visual_feature.transpose(1, 2)
-            # print("\naudio_visual_feature:",audio_visual_feature.shape)
-            
-            # 对音视频特征进行归一化
+                txt = self.text_model(txt, attention_mask)
+
+            # 1. 准备降采样
+            audio_visual_feature = av.transpose(1, 2)  # [batch, dim, seq_len]
+
+            if not self.use_lightweight:
+                # ====== 使用原始实现 ======
+                # 第一层降采样：1576 -> 394
+                audio_visual_feature = self.length_adapt[0](audio_visual_feature)
+
+                # 转置回来进行归一化
+                audio_visual_feature = audio_visual_feature.transpose(1, 2)
+                audio_visual_feature = self.layer_norms[0](audio_visual_feature)
+
+                # 第二层降采样：394 -> 197
+                audio_visual_feature = audio_visual_feature.transpose(1, 2)
+                audio_visual_feature = self.length_adapt[1](audio_visual_feature)
+
+                # 最后的转置和归一化
+                audio_visual_feature = audio_visual_feature.transpose(1, 2)
+                audio_visual_feature = self.layer_norms[1](audio_visual_feature)
+
+            else:
+                # ====== 使用轻量级实现 ======
+                for j in range(2):  # 两次降采样
+                    # 特征增强
+                    enhanced = self.feature_enhance[j](audio_visual_feature)
+
+                    # 通道注意力
+                    se_weight = self.channel_se[j](enhanced)
+                    enhanced = enhanced * se_weight
+
+                    # 降采样
+                    pooled = self.pool_layers[j](enhanced)
+
+                    # 残差连接
+                    residual = self.skip_connections[j](audio_visual_feature)
+                    audio_visual_feature = pooled + residual
+
+                    # 转置回来进行归一化
+                    if j == 1 or (j == 0 and not self.training):
+                        audio_visual_feature = audio_visual_feature.transpose(1, 2)
+                        audio_visual_feature = self.layer_norms[j](audio_visual_feature)
+                        if j < 1:  # 如果不是最后一层，转回去继续处理
+                            audio_visual_feature = audio_visual_feature.transpose(1, 2)
+
+            # 最终特征归一化
             audio_visual_feature = self.layer_norm(audio_visual_feature)
-            
-            # 对文本归一化
             txt = self.layer_norm(txt)
-            
+
             # txt - self-attention torch.Size([1, 512, 768])
             result1 = self.classifcation(txt)
-            # print("\nresult1",result1.shape) 
-            
-            # cross_transformer1: T->(V,A)
+            # print("\nresult1",result1.shape)
+
+            # 交叉注意力融合
+            # T->(V,A)：文本引导的视听注意力
             l_av = self.cross_transformer(audio_visual_feature, result1, result1)
-            #print("==========cross_transformer1: T->(V,A)=========done",l_av.shape) # torch.Size([1, 512, 768])
-            
-            # cross_transformer2: (V,A)->T
+            # (V,A)->T：视听引导的文本注意力
             av_l = self.cross_transformer(result1, audio_visual_feature, audio_visual_feature)
             # print("==========cross_transformer2: (V,A)->T=========done",av_l.shape) # torch.Size([1, 512, 768])
 
-            # cross_transformer2 -> self-attention 
+            # 融合特征的自注意力处理
             l_result = self.classifcation(av_l)
             # print("==========cross_transformer2 -> self-attention=========done",l_result.shape) # torch.Size([1, 512, 768])
-            
+
             # cross_transformer1 -> self-attention
             av_result = self.classifcation(l_av)
             # print("==========cross_transformer1 -> self-attention========done",av_result.shape) # torch.Size([1, 512, 768])
 
             # TODO: 现在直接用训练好的三维序列进行拼接result1 + result2 + l_result + av_result，直接输入liner进行分类
-            # 在计算标号和损失之间的差异时，遇到了维度问题。需要查一下最新的如何将transformer结果进行预测和反向传播            
+            # 在计算标号和损失之间的差异时，遇到了维度问题。需要查一下最新的如何将transformer结果进行预测和反向传播
             # 每个结果的最后一个时间步的输出
             # result1 = result1[-1]
-            #print("result1",result1.shape) 
+            #print("result1",result1.shape)
             # torch.Size([512, 768]) 不取[-1]：torch.Size([1, 512, 768])
-            
+
             all = result1 + audio_visual_feature + l_result + av_result
             #print("\ntest:",all.shape) # torch.Size([1, 512, 768])
-            
+
             # 1. 注意力池化 - 学习每个时间步的重要性
             # [1, 220, 768] -> [1, 220, 1]
             attn_weights = self.attention_pool(all)
             # [1, 220, 1] x [1, 220, 768] -> [1, 768]
             attn_pooled = torch.bmm(attn_weights.transpose(1, 2), all).squeeze(1)
-            #print("\nattn_pooled",attn_pooled.shape)
-            
-            # 2. 全局平均池化
+
+            # 全局平均池化
             avg_pooled = torch.mean(all, dim=1)  # [1, 768]
-            #print("\navg_pooled",avg_pooled.shape)
-            
-            # 组合两种池化结果
-            #pooled_result = torch.cat((attn_pooled, avg_pooled), dim=1)  # [1, 1536]
-            """
-            # 6分类任务 - 使用预训练权重的分类器
-            x = self.classifier[0].dense(pooled_result)
-            x = F.gelu(x)
-            x = F.layer_norm(x, [self.embed_dim])
-            
-            x = self.classifier[1](x)
-            x = F.gelu(x)
-            
-            x = self.classifier[2](x)
-            x = F.gelu(x)
-            x = F.dropout(x, p=0.1, training=self.training)
-            
-            emotion_output = self.classifier[4](x)  # [1, 6]
-            emotion_probs = F.softmax(emotion_output, dim=-1)"""
-            
-            # 2分类任务 - 使用独立的分类器
-            #binary_output = self.binary_classifier(pooled_result)  # [1, 1]
-            binary_output = torch.tanh(attn_pooled)  # sigmoid更符合二分类任务,tanh限制在[-1,1]范围
-            
+
+            # 二分类输出
+            binary_output = torch.tanh(attn_pooled)
+
             return binary_output

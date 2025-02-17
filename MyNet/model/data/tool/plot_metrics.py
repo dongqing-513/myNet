@@ -4,7 +4,7 @@ import numpy as np
 from math import ceil
 
 
-png_name = 'metrics_plot0214.png'
+png_name = 'metrics_plot0216.png'
 
 
 def extract_metrics(log_file):
@@ -110,7 +110,7 @@ def plot_metrics(epochs, val_metrics, losses, f1_metrics):
     # 绘制平滑验证指标曲线
     plt.plot(x_smooth, y_smooth_val, '-', label='Smoothed Accuracy Curve',
              color='#e74c3c', linewidth=2)
-    
+
     # 绘制原始F1数据点
     plt.plot(epochs, f1_metrics, 'o', label='F1 Data Points',
              color='#2ecc71', markersize=8, alpha=0.5)
@@ -152,7 +152,7 @@ def plot_metrics(epochs, val_metrics, losses, f1_metrics):
 
 
 def main():
-    log_file = '/home/mz/demo/MyNet/ckp/0214fortextlstmandmask.log'
+    log_file = '/home/mz/demo/MyNet/0216forseqlen.log'
     print("正在从日志文件中提取指标...")
     epochs, val_metrics, losses, f1_metrics = extract_metrics(log_file)
 
