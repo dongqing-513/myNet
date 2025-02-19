@@ -64,24 +64,31 @@ def config():
     audio_patch_size = [int(16), int(16)]
     hidden_size = int(768)
     decoder_hidden_size = int(512)
-    num_heads = int(12)
+    num_heads = int(12)  # 增加注意力头数，从8增加到12
     num_layers = int(12)
     mlp_ratio = float(4.0)
     use_mae = bool(False)
-    drop_rate = float(0.2)  # 用于所有dropout参数 当前值0.1
+    drop_rate = float(0.15)  # 用于所有dropout参数 当前值0.1
     fusion_type = str('concat')  # 融合方式：'concat', 'add', 'gate'
     skip_interval = int(1)  # 跳跃连接间隔，每隔几层添加一次跳跃连接
     normalize_before = bool(True)  # 是否在attention和FFN之前进行归一化
+    attn_mask = bool(False)  # 是否使用注意力掩码
+    relu_dropout = float(0.15)  # ReLU层的dropout
+    res_dropout = float(0.15)  # 残差连接的dropout
+
+    # 注意力机制参数
+    num_groups = int(4)  # 分组线性变换的分组数
+    reduction_ratio = int(16)  # 特征重校准的压缩比
 
     # Optimizer Setting
     optim_type = "adamw"
     learning_rate = 3e-5       # 降低基础学习率，避免训练不稳定
-    weight_decay = 0.01        # 增加权重衰减，更好的正则化
+    weight_decay = 0.01        # 减小权重衰减
     decay_power = 1
-    max_epoch = 15            # 适当增加训练轮数
+    max_epoch = 15  # 增加训练轮数
     max_steps = 1000000
-    warmup_steps = 2000       # 减少预热步数
-    warmup_ratio = 0.05       # 降低预热比例，更快进入正常训练
+    warmup_steps = 2000  # 减少预热步数
+    warmup_ratio = 0.05  # 预热比例
     beta1 = 0.9
     beta2 = 0.999             # 使用更保守的beta2值
     eps = 1e-8                # 提高数值稳定性
@@ -91,9 +98,9 @@ def config():
     min_lr_ratio = 0.01       # 提高最小学习率比例，避免后期学习过慢
 
     # Dropout和正则化设置
-    attention_dropout = 0.15    # 增加dropout率，增强正则化
-    hidden_dropout = 0.15
-    drop_rate = 0.15           # 统一增加dropout率
+    attention_dropout = 0.1    # 降低dropout率
+    hidden_dropout = 0.15      # 降低dropout率
+    drop_rate = 0.1           # 统一降低dropout率
 
     # 模型结构设置
     fusion_type = 'concat'     # 使用门控机制进行特征融合

@@ -21,44 +21,46 @@ class LayerNorm(nn.Module):
 
 class FusionLayer(nn.Module):
     """渐进式特征融合层"""
-    def __init__(
-        self,
-        hidden_size,
-        num_heads=8,
-        dropout=0.1,
-        relu_dropout=0.1,
-        res_dropout=0.1,
-        attn_dropout=0.1,
-        normalize_before=True
-    ):
+    def __init__(self, config):
         super().__init__()
-        self.normalize_before = normalize_before
-        
+        if isinstance(config, dict):
+            # 如果config是字典，创建一个SimpleNamespace对象
+            from types import SimpleNamespace
+            self.config = SimpleNamespace(**config)
+        else:
+            self.config = config
+            
+        self.normalize_before = self.config.normalize_before
+
         # 自注意力机制
         self.self_attn = MultiheadAttention(
-            embed_dim=hidden_size,
-            num_heads=num_heads,
-            attn_dropout=attn_dropout
+            self.config.hidden_size,
+            self.config.num_heads,
+            self.config.drop_rate,
+            use_optimized=True,
+            config=self.config
         )
-        self.self_attn_layer_norm = LayerNorm(hidden_size)
-        
+        self.self_attn_layer_norm = LayerNorm(self.config.hidden_size)
+
         # 跨模态注意力机制
         self.cross_attn = MultiheadAttention(
-            embed_dim=hidden_size,
-            num_heads=num_heads,
-            attn_dropout=attn_dropout
+            self.config.hidden_size,
+            self.config.num_heads,
+            self.config.drop_rate,
+            use_optimized=True,
+            config=self.config
         )
-        self.cross_attn_layer_norm = LayerNorm(hidden_size)
-        
+        self.cross_attn_layer_norm = LayerNorm(self.config.hidden_size)
+
         # 前馈网络
-        self.fc1 = nn.Linear(hidden_size, hidden_size * 4)
-        self.fc2 = nn.Linear(hidden_size * 4, hidden_size)
-        self.final_layer_norm = LayerNorm(hidden_size)
-        
+        self.fc1 = nn.Linear(self.config.hidden_size, self.config.hidden_size * 4)
+        self.fc2 = nn.Linear(self.config.hidden_size * 4, self.config.hidden_size)
+        self.final_layer_norm = LayerNorm(self.config.hidden_size)
+
         # Dropout settings
-        self.dropout = dropout
-        self.relu_dropout = relu_dropout
-        self.res_dropout = res_dropout
+        self.dropout = nn.Dropout(self.config.drop_rate)
+        self.relu_dropout = nn.Dropout(self.config.relu_dropout)
+        self.res_dropout = nn.Dropout(self.config.res_dropout)
 
     def forward(
         self,
@@ -78,17 +80,17 @@ class FusionLayer(nn.Module):
             layer_idx: Layer index for progressive fusion
         """
         residual = x
-        
+
         # 1. 自注意力（同模态）
         if self.normalize_before:
             x = self.self_attn_layer_norm(x)
         #  Q、K、V 都来自同一个模态，即输入 x。用于在同一模态内捕获特征之间的依赖关系
-        x, _ = self.self_attn(query=x, key=x, value=x)  
-        x = F.dropout(x, p=self.dropout, training=self.training)
+        x, _ = self.self_attn(query=x, key=x, value=x)
+        x = F.dropout(x, p=self.config.drop_rate, training=self.training)
         x = residual + x
         if not self.normalize_before:
             x = self.self_attn_layer_norm(x)
-            
+
         # 2. 跨模态注意力
         if encoder_out is not None:
             residual = x
@@ -100,32 +102,31 @@ class FusionLayer(nn.Module):
                 key=encoder_out,
                 value=encoder_out,
                 # attn_mask=encoder_mask
-            )  
-            x = F.dropout(x, p=self.dropout, training=self.training)
+            )
+            x = F.dropout(x, p=self.config.drop_rate, training=self.training)
             x = residual + x
             if not self.normalize_before:
                 x = self.cross_attn_layer_norm(x)
-        
+
         # 3. 前馈网络
         residual = x
         if self.normalize_before:
             x = self.final_layer_norm(x)
         x = F.relu(self.fc1(x))
-        x = F.dropout(x, p=self.relu_dropout, training=self.training)
+        x = F.dropout(x, p=self.config.relu_dropout, training=self.training)
         x = self.fc2(x)
-        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = F.dropout(x, p=self.config.drop_rate, training=self.training)
         x = residual + x
         if not self.normalize_before:
             x = self.final_layer_norm(x)
-            
+
         return x
 
 class MultiModalFusionEncoder(nn.Module):
     """改进的多模态融合编码器，支持渐进式特征融合和跨层跳跃链接"""
     def __init__(
         self,
-        hidden_size,
-        num_heads=8,
+        config,
         num_layers=12,
         fusion_layers=4,  # 控制开始融合的层数
         stride_layer=2,   # 控制跳跃连接的步长
@@ -140,57 +141,58 @@ class MultiModalFusionEncoder(nn.Module):
     ):
         super().__init__()
         # Initialize parameters
-        self.hidden_size = hidden_size
+        if isinstance(config, dict):
+            # 如果config是字典，创建一个SimpleNamespace对象
+            from types import SimpleNamespace
+            self.config = SimpleNamespace(**config)
+        else:
+            self.config = config
+            
+        self.hidden_size = self.config.hidden_size
         self.fusion_type = fusion_type
-        self.num_heads = num_heads
+        self.num_heads = self.config.num_heads
         self.fusion_layers = fusion_layers
         self.stride_layer = stride_layer
-        self.normalize_before = normalize_before
-        
+        self.normalize_before = self.config.normalize_before
+
         # Embedding setup
-        self.embed_scale = math.sqrt(hidden_size)
-        self.embed_positions = SinusoidalPositionalEmbedding(hidden_size)
+        self.embed_scale = math.sqrt(self.config.hidden_size)
+        self.embed_positions = SinusoidalPositionalEmbedding(self.config.hidden_size)
         self.dropout = embed_dropout
-        
+
         # Create progressive fusion layers
         self.layers = nn.ModuleList([
             FusionLayer(
-                hidden_size=hidden_size,
-                num_heads=num_heads,
-                dropout=dropout,
-                relu_dropout=relu_dropout,
-                res_dropout=res_dropout,
-                attn_dropout=attn_dropout,
-                normalize_before=normalize_before
+                config=self.config
             )
             for _ in range(num_layers)
         ])
-        
+
         # Final layer normalization
-        self.layer_norm = LayerNorm(hidden_size)
-        
+        self.layer_norm = LayerNorm(self.config.hidden_size)
+
         # Linear layer for feature fusion
         if fusion_type == 'concat':
             self.fusion_layer = nn.Sequential(
-                nn.Linear(hidden_size * 2, hidden_size),
+                nn.Linear(self.config.hidden_size * 2, self.config.hidden_size),
                 nn.ReLU(),
-                nn.Dropout(dropout),
-                LayerNorm(hidden_size)
+                nn.Dropout(self.config.drop_rate),
+                LayerNorm(self.config.hidden_size)
             )
         elif fusion_type == 'gate':
             # 为gate类型添加fusion_layer
             self.fusion_layer = nn.Sequential(
-                nn.Linear(hidden_size * 2, hidden_size),  # 输入维度是当前状态和历史状态的拼接
+                nn.Linear(self.config.hidden_size * 2, self.config.hidden_size),  # 输入维度是当前状态和历史状态的拼接
                 nn.ReLU(),
-                nn.Linear(hidden_size, hidden_size),  # 输出维度与隐藏层大小相同，用于生成门控值
-                nn.Dropout(dropout)
+                nn.Linear(self.config.hidden_size, self.config.hidden_size),  # 输出维度与隐藏层大小相同，用于生成门控值
+                nn.Dropout(self.config.drop_rate)
             )
         elif fusion_type == 'add':
             self.fusion_layer = nn.Sequential(
-                nn.Linear(hidden_size * 2, hidden_size),
+                nn.Linear(self.config.hidden_size * 2, self.config.hidden_size),
                 nn.ReLU(),
-                nn.Dropout(dropout),
-                LayerNorm(hidden_size)
+                nn.Dropout(self.config.drop_rate),
+                LayerNorm(self.config.hidden_size)
             )
 
     def forward(self, x_in, x_in_k=None, x_in_v=None):
@@ -206,7 +208,7 @@ class MultiModalFusionEncoder(nn.Module):
         if self.embed_positions is not None:
             x += self.embed_positions(x_in.transpose(0, 1)[:, :, 0]).transpose(0, 1)
         x = F.dropout(x, p=self.dropout, training=self.training)
-        
+
         # 2. Handle cross-modal inputs
         if x_in_k is not None and x_in_v is not None:
             x_k = self.embed_scale * x_in_k
@@ -216,20 +218,20 @@ class MultiModalFusionEncoder(nn.Module):
                 x_v += self.embed_positions(x_in_v.transpose(0, 1)[:, :, 0]).transpose(0, 1)
             x_k = F.dropout(x_k, p=self.dropout, training=self.training)
             x_v = F.dropout(x_v, p=self.dropout, training=self.training)
-        
+
         # 3. 渐进式特征融合
         # 访问之前所有层的中间表示
         # 灵活地选择如何融合这些历史信息
         # 在不影响自注意力处理的情况下实现特征重用
         start_fusion_layer = max(0, len(self.layers) - self.fusion_layers)
         cross_attn_states = []  # 存储交叉注意力的中间状态
-        
+
         for i, layer in enumerate(self.layers):
             # 存储交叉注意力的中间状态（按照stride_layer的间隔）
             if i >= start_fusion_layer and (i - start_fusion_layer) % self.stride_layer == 0:
                 # 在处理当前层之前存储，保存的是上一层的输出
                 cross_attn_states.append(x)
-            
+
             # 分情况处理：自注意力或交叉注意力
             if x_in_k is not None and x_in_v is not None and i >= start_fusion_layer:
                 # 交叉注意力处理 attention -> dropout -> residual -> norm
@@ -239,12 +241,12 @@ class MultiModalFusionEncoder(nn.Module):
                 x = F.dropout(x, p=self.dropout, training=self.training)
                 x = residual + x
                 x = self.layer_norm(x)
-                
+
                 # 应用跨层跳跃连接（按照stride_layer的间隔且有足够的历史状态）
                 if len(cross_attn_states) > 1 and (i - start_fusion_layer + 1) % self.stride_layer == 0:
                     # 融合之前所有层的中间表示 当前状态 + 历史状态
                     if self.fusion_type == 'concat':
-                        # 连接所有之前的状态 
+                        # 连接所有之前的状态
                         all_states = torch.cat([x] + cross_attn_states[:-1], dim=-1)
                         x = self.fusion_layer(all_states)
                     elif self.fusion_type == 'add':
@@ -270,9 +272,9 @@ class MultiModalFusionEncoder(nn.Module):
                 x = F.dropout(x, p=self.dropout, training=self.training)
                 x = residual + x
                 x = self.layer_norm(x)
-        
+
         # 4. Final layer normalization
         if self.layer_norm is not None:
             x = self.layer_norm(x)
-            
+
         return x

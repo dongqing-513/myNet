@@ -4,8 +4,8 @@ import numpy as np
 from math import ceil
 
 
-png_name = 'metrics_plot0216.png'
-
+png_name = 'metrics_plot0218.png'
+log_file = '/home/mz/demo/MyNet/0218mul_attention_optimized.log'
 
 def extract_metrics(log_file):
     # 使用字典来存储每个 epoch 的所有值和最佳值
@@ -152,7 +152,6 @@ def plot_metrics(epochs, val_metrics, losses, f1_metrics):
 
 
 def main():
-    log_file = '/home/mz/demo/MyNet/0216forseqlen.log'
     print("正在从日志文件中提取指标...")
     epochs, val_metrics, losses, f1_metrics = extract_metrics(log_file)
 

@@ -11,40 +11,46 @@ class TransformerEncoder(nn.Module):
     Transformer encoder consisting of *args.encoder_layers* layers. Each layer
     is a :class:`TransformerEncoderLayer`.
     Args:
-        embed_tokens (torch.nn.Embedding): input embedding
-        num_heads (int): number of heads
-        layers (int): number of layers
-        attn_dropout (float): dropout applied on the attention weights
-        relu_dropout (float): dropout applied on the first layer of the residual block
-        res_dropout (float): dropout applied on the residual block
-        attn_mask (bool): whether to apply mask on the attention weights
+        embed_dim: Embedding dimension
+        num_heads: Number of attention heads
+        layers: Number of layers
+        attn_dropout: Dropout applied on the attention weights
+        relu_dropout: Dropout applied on the first layer of the residual block
+        res_dropout: Dropout applied on the residual block
+        attn_mask: Boolean indicating whether to apply mask or not
     """
 
     def __init__(self, embed_dim, num_heads, layers, attn_dropout=0.0, relu_dropout=0.0, res_dropout=0.0,
                  embed_dropout=0.0, attn_mask=False):
         super().__init__()
-        self.dropout = embed_dropout      # Embedding dropout
+        self.dropout = embed_dropout
         self.attn_dropout = attn_dropout
         self.embed_dim = embed_dim
         self.embed_scale = math.sqrt(embed_dim)
-        self.embed_positions = SinusoidalPositionalEmbedding(embed_dim)
         
-        self.attn_mask = attn_mask
+        # 创建基本配置
+        config = {
+            'hidden_size': embed_dim,
+            'num_heads': num_heads,
+            'drop_rate': attn_dropout,
+            'relu_dropout': relu_dropout,
+            'res_dropout': res_dropout,
+            'normalize_before': True,
+            'attn_mask': attn_mask,
+            'num_groups': 2,  # 默认值
+            'reduction_ratio': 8  # 默认值
+        }
 
         self.layers = nn.ModuleList([])
-        for layer in range(layers):
-            new_layer = TransformerEncoderLayer(embed_dim,
-                                                num_heads=num_heads,
-                                                attn_dropout=attn_dropout,
-                                                relu_dropout=relu_dropout,
-                                                res_dropout=res_dropout,
-                                                attn_mask=attn_mask)
-            self.layers.append(new_layer)
+        for _ in range(layers):
+            self.layers.append(TransformerEncoderLayer(config))
 
         self.register_buffer('version', torch.Tensor([2]))
         self.normalize = True
-        if self.normalize:
-            self.layer_norm = LayerNorm(embed_dim)
+        self.layer_norm = LayerNorm(embed_dim)
+        self.embed_positions = SinusoidalPositionalEmbedding(embed_dim)
+        
+        self.attn_mask = attn_mask
 
     def forward(self, x_in, x_in_k = None, x_in_v = None):
         """
@@ -139,47 +145,45 @@ class TransformerEncoder(nn.Module):
 
 class TransformerEncoderLayer(nn.Module):
     """Encoder layer block.
-    In the original paper each operation (multi-head attention or FFN) is
-    postprocessed with: `dropout -> add residual -> layernorm`. In the
-    tensor2tensor code they suggest that learning is more robust when
-    preprocessing each layer with layernorm and postprocessing with:
-    `dropout -> add residual`. We default to the approach in the paper, but the
-    tensor2tensor approach can be enabled by setting
-    *args.encoder_normalize_before* to ``True``.
     Args:
         embed_dim: Embedding dimension
     """
 
-    def __init__(self, embed_dim, num_heads=4, attn_dropout=0.1, relu_dropout=0.1, res_dropout=0.1,
-                 attn_mask=False):
+    def __init__(self, config):
         super().__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        
-        self.self_attn = MultiheadAttention(
-            embed_dim=self.embed_dim,
-            num_heads=self.num_heads,
-            attn_dropout=attn_dropout
-        )
-        self.attn_mask = attn_mask
+        if isinstance(config, dict):
+            from types import SimpleNamespace
+            self.config = SimpleNamespace(**config)
+        else:
+            self.config = config
 
-        self.relu_dropout = relu_dropout
-        self.res_dropout = res_dropout
-        self.normalize_before = True
+        self.normalize_before = self.config.normalize_before
+
+        self.self_attn = MultiheadAttention(
+            self.config.hidden_size,
+            self.config.num_heads,
+            self.config.drop_rate,
+            use_optimized=True,
+            config=self.config
+        )
+        self.attn_mask = self.config.attn_mask
+
+        self.relu_dropout = self.config.relu_dropout
+        self.res_dropout = self.config.res_dropout
 
          # Memory and Compound control
         self.mem_proj = nn.Sequential(
-            nn.Linear(2*embed_dim, embed_dim),
+            nn.Linear(2*self.config.hidden_size, self.config.hidden_size),
             nn.Sigmoid()
         )
         self.att_proj = nn.Sequential(
-            nn.Linear(2*embed_dim, embed_dim),
+            nn.Linear(2*self.config.hidden_size, self.config.hidden_size),
             nn.Sigmoid()           
         )
 
-        self.fc1 = Linear(self.embed_dim, 4*self.embed_dim)   # The "Add & Norm" part in the paper
-        self.fc2 = Linear(4*self.embed_dim, self.embed_dim)
-        self.layer_norms = nn.ModuleList([LayerNorm(self.embed_dim) for _ in range(2)])
+        self.fc1 = Linear(self.config.hidden_size, 4*self.config.hidden_size)   # The "Add & Norm" part in the paper
+        self.fc2 = Linear(4*self.config.hidden_size, self.config.hidden_size)
+        self.layer_norms = nn.ModuleList([LayerNorm(self.config.hidden_size) for _ in range(2)])
 
     def forward(self, x, x_k=None, x_v=None):
         """
@@ -257,6 +261,17 @@ def LayerNorm(embedding_dim):
 
 
 if __name__ == '__main__':
-    encoder = TransformerEncoder(300, 4, 2)
-    x = torch.tensor(torch.rand(20, 2, 300))
+    class Config:
+        def __init__(self):
+            self.hidden_size = 300
+            self.num_heads = 4
+            self.drop_rate = 0.1
+            self.relu_dropout = 0.1
+            self.res_dropout = 0.1
+            self.normalize_before = True
+            self.attn_mask = False
+
+    config = Config()
+    encoder = TransformerEncoder(config.hidden_size, config.num_heads, 2)
+    x = torch.tensor(torch.rand(20, 2, config.hidden_size))
     print(encoder(x).shape)

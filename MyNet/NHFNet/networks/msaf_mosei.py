@@ -23,19 +23,27 @@ class MSAFLSTMNet(nn.Module):
         self.embed_dim = _config["hidden_size"]  # 使用_config获取参数
         # 交叉注意力
 
+        # 确保配置中包含所有必要的参数
+        config = {
+            'hidden_size': _config['hidden_size'],
+            'num_heads': _config['num_heads'],
+            'num_layers': _config['num_layers'],
+            'drop_rate': _config['drop_rate'],
+            'relu_dropout': _config['drop_rate'],
+            'res_dropout': _config['drop_rate'],
+            'normalize_before': _config['normalize_before'],
+            'num_groups': _config.get('num_groups', 2),  # 默认值为2
+            'reduction_ratio': _config.get('reduction_ratio', 8),  # 默认值为8
+            'attn_mask': False
+        }
+
         self.cross_transformer = MultiModalFusionEncoder(
-            hidden_size=self.embed_dim,
-            num_heads=_config['num_heads'],
+            config=config,
             num_layers=_config['num_layers'],
+            fusion_layers=4,  # 控制开始融合的层数
             stride_layer=_config['skip_interval'],
             fusion_type=_config['fusion_type'],
-            dropout=_config['drop_rate'],
-            relu_dropout=_config['drop_rate'],
-            res_dropout=_config['drop_rate'],
-            attn_dropout=_config['drop_rate'],
-            embed_dropout=_config['drop_rate'],
-            attn_mask=False,
-            normalize_before=_config['normalize_before']
+            embed_dropout=_config['drop_rate']
         )
         """
         self.cross_transformer = TransformerEncoder(
@@ -50,18 +58,12 @@ class MSAFLSTMNet(nn.Module):
         # 自注意力
 
         self.classifcation = MultiModalFusionEncoder(
-            hidden_size=self.embed_dim,
-            num_heads=_config['num_heads'],
+            config=config,  # 直接传入配置对象
             num_layers=_config['num_layers'],
+            fusion_layers=4,  # 控制开始融合的层数
             stride_layer=_config['skip_interval'],
             fusion_type=_config['fusion_type'],
-            dropout=_config['drop_rate'],
-            relu_dropout=_config['drop_rate'],
-            res_dropout=_config['drop_rate'],
-            attn_dropout=_config['drop_rate'],
-            embed_dropout=_config['drop_rate'],
-            attn_mask=False,
-            normalize_before=_config['normalize_before']
+            embed_dropout=_config['drop_rate']
         )
         """
         self.classifcation = TransformerEncoder(
@@ -316,7 +318,7 @@ class MSAFLSTMNet(nn.Module):
             audio_visual_feature = self.layer_norm(audio_visual_feature)
             txt = self.layer_norm(txt)
 
-            # txt - self-attention torch.Size([1, 512, 768])
+            # txt - self-attention torch.Size([1, 197, 768])
             result1 = self.classifcation(txt)
             # print("\nresult1",result1.shape)
 
