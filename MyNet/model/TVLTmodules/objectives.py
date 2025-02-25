@@ -113,12 +113,12 @@ def compute_mlm(pl_module, batch):
     return ret
 
 def compute_mae_video(pl_module, batch, patch_size=16, num_patches=14):
-    
+
     infer = pl_module.infer(batch, mask_text=False, mask_visual=True, use_mae=True)
-    pred = pl_module.transformer.mae_score_video(infer["video_feats"])    
+    pred = pl_module.transformer.mae_score_video(infer["video_feats"])
     target = patchify_video(infer['video'], patch_size)
     mask = infer['video_masks']
-    
+
     loss = (pred - target) ** 2
     loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
@@ -147,15 +147,15 @@ def patchify_video(vids, p=16):
     x = torch.einsum('ntchpwq->nthwpqc', x)
     x = x.reshape(shape=(vids.shape[0], h * w * t, p**2 * vids.shape[2]))
     return x
-    
-    
+
+
 def compute_mae_audio(pl_module, batch, audio_patch_size=[2,128]):
     infer = pl_module.infer(batch, mask_text=False, mask_visual=True, use_mae=True)
-    
-    pred = pl_module.transformer.mae_score_audio(infer["audio_feats"])   
+
+    pred = pl_module.transformer.mae_score_audio(infer["audio_feats"])
     target = patchify_audio(infer['audio'], audio_patch_size[0], audio_patch_size[1])
     mask = infer['audio_masks']
-    
+
     loss = (pred - target) ** 2
     loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
@@ -184,30 +184,30 @@ def patchify_audio(audios, p1=16, p2=16):
     x = torch.einsum('nchpwq->nhwpqc', x)
     x = x.reshape(shape=(audios.shape[0], h * w, p1 * p2 * audios.shape[1]))
     return x
-    
-    
+
+
 def denormalize(x):
     return (np.clip(x, -1.0, 1.0) + 1.0)/2.0
 
 
 def compute_mae_joint(pl_module, batch, patch_size=16, audio_patch_size=[2,128]):
     infer = pl_module.infer(batch, mask_text=False, mask_visual=True, use_mae=True)
-    
-    pred_a = pl_module.transformer.mae_score_audio(infer["audio_feats"])   
+
+    pred_a = pl_module.transformer.mae_score_audio(infer["audio_feats"])
     target_a = patchify_audio(infer['audio'], audio_patch_size[0], audio_patch_size[1])
     mask_a = infer['audio_masks']
     loss_a = (pred_a - target_a) ** 2
     loss_a = loss_a.mean(dim=-1)  # [N, L], mean loss per patch
     loss_a = (loss_a * mask_a).sum() / mask_a.sum()   # mean loss on removed patches
 
-    pred_v = pl_module.transformer.mae_score_video(infer["video_feats"])    
+    pred_v = pl_module.transformer.mae_score_video(infer["video_feats"])
     target_v = patchify_video(infer['video'], patch_size)
-    mask_v = infer['video_masks']    
+    mask_v = infer['video_masks']
     loss_v = (pred_v - target_v) ** 2
     loss_v = loss_v.mean(dim=-1)  # [N, L], mean loss per patch
-    loss_v = (loss_v * mask_v).sum() / mask_v.sum()   # mean loss on removed patches  
+    loss_v = (loss_v * mask_v).sum() / mask_v.sum()   # mean loss on removed patches
 
-    
+
     ret = {
         "mae_audio_loss": loss_a,
         "mae_video_loss": loss_v
@@ -245,7 +245,7 @@ def compute_vam(pl_module, batch):
                 ti if vam_labels[i] == 1 else fi
                 for i, (ti, fi) in enumerate(zip(batch["video_data"], batch["false_video_0"]))
             ]
-        )    
+        )
     batch = {k: v for k, v in batch.items()}
     batch["video_data"] = vam_videos
 
@@ -260,7 +260,7 @@ def compute_vam(pl_module, batch):
 
     phase = "train" if pl_module.training else "val"
     loss = getattr(pl_module, f"{phase}_vam_loss")(ret["vam_loss"])
-    
+
     acc = getattr(pl_module, f"{phase}_vam_accuracy")(
         ret["vam_logits"], ret["vam_labels"]
     )
@@ -288,12 +288,12 @@ def compute_vtm(pl_module, batch):
                 ti if vtm_labels[i] == 1 else fi
                 for i, (ti, fi) in enumerate(zip(batch["video_data"], batch["false_video_0"]))
             ]
-        )    
+        )
     batch = {k: v for k, v in batch.items()}
     batch["video_data"] = vtm_videos
 
     infer = pl_module.infer(batch, mask_text=False, mask_visual=False)
-    
+
     vtm_logits = pl_module.transformer.matching_score(infer["cls_feats"])
     vtm_loss = F.binary_cross_entropy_with_logits(vtm_logits, vtm_labels.unsqueeze(1))
     ret = {
@@ -312,11 +312,11 @@ def compute_vtm(pl_module, batch):
 
     return ret
 
-# 将特征值从一个连续的数值范围离散化为两个类别，二值化处理               
+# 将特征值从一个连续的数值范围离散化为两个类别，二值化处理
 def a2_parse(a):
     if a < 0:
             res = 0
-    else: 
+    else:
             res = 1
     return res
 
@@ -342,7 +342,7 @@ def compute_moseiemo(pl_module, batch):
     # 使用pl_module的transformer对象的分类器对推理得到的特征（cls_feats）进行处理，得到情感分数预测。
     mosei_score = pl_module.transformer.classifier(infer["cls_feats"])
     # print(f"After classifier, mosei_score size: {mosei_score.size()}")  #  torch.Size([4, 6]) 有 4 个样本，每个样本对应 6 个类别
-    
+
     # 计算损失
     # 从批次数据中提取情感标签列表，并转换为张量并移动到与模型相同的设备上。
     labels = torch.tensor(batch["emolist"]).to(pl_module.device).float()
@@ -351,7 +351,7 @@ def compute_moseiemo(pl_module, batch):
     # 输入张量 目标张量
     mosei_loss = F.binary_cross_entropy_with_logits(mosei_score, labels)
     # print(f"mosei_loss size: {mosei_loss.size()}")
-    
+
     # 构建返回字典
     # 创建一个包含损失、预测分数和真实标签的字典，用于后续的处理和返回
     ret = {
@@ -365,7 +365,7 @@ def compute_moseiemo(pl_module, batch):
     phase = "train" if pl_module.training else "val"
     # 获取当前阶段的损失处理方法，并传入计算得到的损失值
     loss = getattr(pl_module, f"{phase}_moseiemo_loss")(ret["moseiemo_loss"])
-    
+
     # 分别针对不同的情感类别（快乐、悲伤、愤怒、恐惧、厌恶、惊讶）计算准确率
     happy = getattr(pl_module, f"{phase}_moseiemo_happy")(mosei_score[:, 0:1], labels[:, 0:1])
     sad = getattr(pl_module, f"{phase}_moseiemo_sad")(mosei_score[:, 1:2], labels[:, 1:2])
@@ -373,7 +373,7 @@ def compute_moseiemo(pl_module, batch):
     fear = getattr(pl_module, f"{phase}_moseiemo_fear")(mosei_score[:, 3:4], labels[:, 3:4])
     disgust = getattr(pl_module, f"{phase}_moseiemo_disgust")(mosei_score[:, 4:5], labels[:, 4:5])
     surprise = getattr(pl_module, f"{phase}_moseiemo_surprise")(mosei_score[:, 5:6], labels[:, 5:6])
-    
+
     # 记录不同阶段和不同情感类别的损失和准确率到日志中，以便在训练过程中进行监控和分析。
     pl_module.log(f"moseiemo/{phase}/loss", loss)
     pl_module.log(f"moseiemo/{phase}/happy", happy)
@@ -396,10 +396,10 @@ def compute_mosei(pl_module, batch):
     # infer = pl_module.infer(batch, mask_text=False, mask_visual=False)
     # print("\nmosei_score[hidden_size]",mosei_score["hidden_size"].shape)
     mosei_score = pl_module.transformer.classifier(mosei_score["hidden_size"])
-    
+
     score_label = torch.tensor(batch["score"]).to(pl_module.device)
     # 将二分类问题视为一个回归问题，将模型的输出视为一个连续的预测得分，目标是使这个预测得分尽可能接近真实标签
-    mosei_loss = F.mse_loss(mosei_score.squeeze(), score_label.squeeze(), size_average=None, reduce=None, reduction='mean') 
+    mosei_loss = F.mse_loss(mosei_score.squeeze(), score_label.squeeze(), size_average=None, reduce=None, reduction='mean')
     ret = {
         "mosei_loss": mosei_loss,
         "mosei_score": mosei_score,
@@ -408,16 +408,16 @@ def compute_mosei(pl_module, batch):
 
     phase = "train" if pl_module.training else "val"
     loss = getattr(pl_module, f"{phase}_mosei_loss")(ret["mosei_loss"])
-    
+
     acc2 = getattr(pl_module, f"{phase}_mosei_accuracy2")(
         get_logits_a2(mosei_score), ret["mosei_labels2"]
     )
-    
+
     # 计算F1 Score及其相关指标
     f1_metrics = getattr(pl_module, f"{phase}_mosei_f1score")(
         get_logits_a2(mosei_score), ret["mosei_labels2"]
     )
-    
+
     # 记录当前阶段的损失和准确率到日志中，以便在训练过程中进行监控和分析。
     pl_module.log(f"mosei/{phase}/loss", loss)
     pl_module.log(f"mosei2/{phase}/accuracy2", acc2)
@@ -472,7 +472,6 @@ def compute_mosei(pl_module, batch):
     # 获取原始分数和二分类标签
     score_label = torch.tensor(batch["score"]).to(pl_module.device)
     # print(f"score_label size: {score_label.size()}") # ([1, 2])
-    # binary_labels = (score_label >= 0).float()  # 转换为二分类标签
     binary_labels = (score_label >= 0).float()  # 转换为二分类标签
 
     # 将 binary_labels 扩展为 [1, 2] 的独热编码形式
@@ -483,17 +482,17 @@ def compute_mosei(pl_module, batch):
     smoothing = 0.1
     binary_labels = binary_labels * (1 - smoothing) + smoothing / 2
 
-    # 由于已经在数据层面实现了平衡采样，这里使用更温和的类别权重
+    # 计算类别权重
     pos_count = (binary_labels > 0.5).sum()
     neg_count = (binary_labels <= 0.5).sum()
     total = pos_count + neg_count
-    
+
     # 使用batch内的实际比例计算权重，但限制权重范围避免过度补偿
     weight_scale = min(max(pos_count / neg_count, 0.5), 2.0)
     pos_weight = 1.0
     neg_weight = weight_scale
-    
-    sample_weights = torch.where(binary_labels > 0.5, 
+
+    sample_weights = torch.where(binary_labels > 0.5,
                                pos_weight * torch.ones_like(binary_labels),
                                neg_weight * torch.ones_like(binary_labels))
 
@@ -532,13 +531,13 @@ def compute_mosei(pl_module, batch):
         "confidence_reg": confidence_reg.item(),
         "boundary_loss": boundary_loss.item()
     }
-    
+
     # 计算总损失
     loss = (
         weighted_bce_loss * 1.0 +  # 主损失
-        focal_loss * 0.5 +         # 降低focal loss的权重
-        confidence_reg * 0.1 +     # 保持小的正则化权重
-        boundary_loss * 0.3        # 保持边界损失权重
+        focal_loss * 0.5 +         # focal loss权重
+        confidence_reg * 0.1 +     # 置信度正则化权重
+        boundary_loss * 0.3        # 边界损失权重
     )
 
     # 计算当前batch的类别分布
@@ -560,7 +559,6 @@ def compute_mosei(pl_module, batch):
     }
 
     # 根据训练阶段计算特定损失和准确率
-    # 确定当前是训练阶段还是验证阶段。
     phase = "train" if pl_module.training else "val"
     # 获取当前阶段的损失处理方法，并传入计算得到的损失值
     loss = getattr(pl_module, f"{phase}_mosei_loss")(ret["mosei_loss"])
@@ -627,7 +625,7 @@ def compute_vrar_recall(pl_module):
              _b["a_index"],
             ],
         )
-        
+
     aids = list()
     for pre in audio_preload:
         aids += pre[1]
@@ -640,7 +638,7 @@ def compute_vrar_recall(pl_module):
              _b["v_index"],
             ],
         )
-        
+
     rank_scores = list()
     rank_iids = list()
 
@@ -655,7 +653,7 @@ def compute_vrar_recall(pl_module):
         for audio_batch in audio_preload:
             fblen = len(audio_batch[0])
             ve = _ve.expand(fblen, l, c, h, w)
-            
+
             with torch.cuda.amp.autocast():
                 score = pl_module.transformer.matching_score(
                     pl_module.infer(
@@ -667,14 +665,14 @@ def compute_vrar_recall(pl_module):
                 )[:, 0]
                 score = F.sigmoid(score)
             video_batch_score.append(score)
-    
+
         video_batch_score = torch.cat(video_batch_score)
-        rank_scores.append(video_batch_score.cpu().tolist()) 
+        rank_scores.append(video_batch_score.cpu().tolist())
         rank_iids.append(_vid)
 
         if count == num_samples:
             break
-            
+
     torch.distributed.barrier()
     gather_rank_scores = all_gather(rank_scores)
     gather_rank_iids = all_gather(rank_iids)
@@ -709,7 +707,7 @@ def compute_vrar_recall(pl_module):
     return (ir_r1, ir_r5, ir_r10, tr_r1, tr_r5, tr_r10)
 
 
-    
+
 def init_weights(module):
     if isinstance(module, (nn.Linear, nn.Embedding)):
         module.weight.data.normal_(mean=0.0, std=0.02)

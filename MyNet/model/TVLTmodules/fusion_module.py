@@ -29,7 +29,7 @@ class FusionLayer(nn.Module):
             self.config = SimpleNamespace(**config)
         else:
             self.config = config
-            
+
         self.normalize_before = self.config.normalize_before
 
         # 自注意力机制
@@ -147,7 +147,7 @@ class MultiModalFusionEncoder(nn.Module):
             self.config = SimpleNamespace(**config)
         else:
             self.config = config
-            
+
         self.hidden_size = self.config.hidden_size
         self.fusion_type = fusion_type
         self.num_heads = self.config.num_heads
@@ -179,14 +179,6 @@ class MultiModalFusionEncoder(nn.Module):
                 nn.Dropout(self.config.drop_rate),
                 LayerNorm(self.config.hidden_size)
             )
-        elif fusion_type == 'gate':
-            # 为gate类型添加fusion_layer
-            self.fusion_layer = nn.Sequential(
-                nn.Linear(self.config.hidden_size * 2, self.config.hidden_size),  # 输入维度是当前状态和历史状态的拼接
-                nn.ReLU(),
-                nn.Linear(self.config.hidden_size, self.config.hidden_size),  # 输出维度与隐藏层大小相同，用于生成门控值
-                nn.Dropout(self.config.drop_rate)
-            )
         elif fusion_type == 'add':
             self.fusion_layer = nn.Sequential(
                 nn.Linear(self.config.hidden_size * 2, self.config.hidden_size),
@@ -194,6 +186,24 @@ class MultiModalFusionEncoder(nn.Module):
                 nn.Dropout(self.config.drop_rate),
                 LayerNorm(self.config.hidden_size)
             )
+        elif fusion_type == 'gate':
+            # 改进的门控融合层
+            self.fusion_layer = nn.ModuleDict({
+                # 负责生成门控值，决定如何融合当前特征和历史特征
+                'gate_net': nn.Sequential(
+                    nn.Linear(self.config.hidden_size * 2, self.config.hidden_size),
+                    nn.ReLU(),
+                    nn.Linear(self.config.hidden_size, self.config.hidden_size),
+                    nn.Sigmoid()
+                ),
+                # 负责对历史特征进行非线性变换，增强特征表示能力
+                'transform': nn.Sequential(
+                    nn.Linear(self.config.hidden_size, self.config.hidden_size),
+                    nn.ReLU(),
+                    nn.Dropout(self.config.drop_rate),
+                    LayerNorm(self.config.hidden_size)
+                )
+            })
 
     def forward(self, x_in, x_in_k=None, x_in_v=None):
         """
@@ -256,15 +266,19 @@ class MultiModalFusionEncoder(nn.Module):
                         # 将当前状态和平均历史状态拼接，通过fusion_layer处理
                         fused = torch.cat([x, avg_state], dim=-1)
                         x = self.fusion_layer(fused)
-                    else:  # gate
+                    elif self.fusion_type == 'gate':
                         # 计算历史状态的平均值
                         history_state = torch.mean(torch.stack(cross_attn_states[:-1]), dim=0)
-                        # 将当前状态和历史状态拼接
-                        concat_states = torch.cat([x, history_state], dim=-1)
+
                         # 生成门控值
-                        gate = torch.sigmoid(self.fusion_layer(concat_states))
-                        # 使用门控机制融合当前状态和历史状态
-                        x = gate * x + (1 - gate) * history_state
+                        concat_states = torch.cat([x, history_state], dim=-1)
+                        gate = self.fusion_layer['gate_net'](concat_states)
+
+                        # 转换历史状态
+                        transformed_history = self.fusion_layer['transform'](history_state)
+
+                        # 动态门控融合，控制特征融合比例
+                        x = gate * x + (1 - gate) * transformed_history
             else:
                 # 自注意力处理（保持独立的逻辑）
                 residual = x

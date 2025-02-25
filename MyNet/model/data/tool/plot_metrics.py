@@ -5,7 +5,7 @@ from math import ceil
 
 
 png_name = 'metrics_plot0218.png'
-log_file = '/home/mz/demo/MyNet/0218mul_attention_optimized.log'
+log_file = '/home/mz/demo/MyNet/ckp/0217mul_attention.log'
 
 def extract_metrics(log_file):
     # 使用字典来存储每个 epoch 的所有值和最佳值

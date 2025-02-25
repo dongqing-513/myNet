@@ -30,7 +30,7 @@ def config():
     datasets = []
     loss_names = _loss_names({})
     # batch_size = 4096  # 将批量大小调整为64 this is a desired batch size; pl trainer will accumulate gradients when per step bat
-    batch_size = 16
+    batch_size = 32
 
     max_text_len = 40
     draw_false_text = 0
@@ -68,13 +68,13 @@ def config():
     num_layers = int(12)
     mlp_ratio = float(4.0)
     use_mae = bool(False)
-    drop_rate = float(0.15)  # 用于所有dropout参数 当前值0.1
-    fusion_type = str('concat')  # 融合方式：'concat', 'add', 'gate'
+    drop_rate = float(0.1)  # 降低dropout率到0.1
+    fusion_type = str('gate')  # 融合方式：'concat', 'add', 'gate'
     skip_interval = int(1)  # 跳跃连接间隔，每隔几层添加一次跳跃连接
     normalize_before = bool(True)  # 是否在attention和FFN之前进行归一化
     attn_mask = bool(False)  # 是否使用注意力掩码
-    relu_dropout = float(0.15)  # ReLU层的dropout
-    res_dropout = float(0.15)  # 残差连接的dropout
+    relu_dropout = float(0.15)  # ReLU层的dropout，降低到0.1
+    res_dropout = float(0.15)  # 残差连接的dropout，降低到0.1
 
     # 注意力机制参数
     num_groups = int(4)  # 分组线性变换的分组数
@@ -82,13 +82,13 @@ def config():
 
     # Optimizer Setting
     optim_type = "adamw"
-    learning_rate = 3e-5       # 降低基础学习率，避免训练不稳定
+    learning_rate = 5e-5       # 降低基础学习率，避免训练不稳定
     weight_decay = 0.01        # 减小权重衰减
     decay_power = 1
     max_epoch = 15  # 增加训练轮数
     max_steps = 1000000
-    warmup_steps = 2000  # 减少预热步数
-    warmup_ratio = 0.05  # 预热比例
+    warmup_steps = 3000
+    warmup_ratio = 0.05
     beta1 = 0.9
     beta2 = 0.999             # 使用更保守的beta2值
     eps = 1e-8                # 提高数值稳定性
@@ -99,13 +99,8 @@ def config():
 
     # Dropout和正则化设置
     attention_dropout = 0.1    # 降低dropout率
-    hidden_dropout = 0.15      # 降低dropout率
+    hidden_dropout = 0.1      # 降低dropout率
     drop_rate = 0.1           # 统一降低dropout率
-
-    # 模型结构设置
-    fusion_type = 'concat'     # 使用门控机制进行特征融合
-    skip_interval = 2        # 增加跳跃连接间隔
-    normalize_before = True   # 保持在attention和FFN之前进行归一化
 
     # 梯度裁剪
     gradient_clip_val = 0.5     # 使用更保守的梯度裁剪
@@ -120,6 +115,18 @@ def config():
 
     # 批次设置
     accumulate_grad_batches = 32   # 增加梯度累积来模拟更大批次
+
+    # Checkpoint settings
+    ckpt_path = None  # Path to resume training from
+    save_top_k = 3    # Number of best checkpoints to keep
+    monitor = "val_loss"  # Metric to monitor
+    save_last = True  # Save the last checkpoint
+    every_n_epochs = 1  # Save checkpoint frequency
+    ckpt_dir = "/data1/checkpoints/MyNet"  # Directory to save checkpoints
+
+    # Training robustness
+    max_time = "12:00:00"  # Maximum training time
+    auto_resume = True     # Automatically resume from checkpoint
 
     # Downstream Setting
     vqav2_label_size = 3129
@@ -171,7 +178,6 @@ def task_cls_mosei():
 
     audio_size = 1024
 
-    # 增加视频帧数以捕获更多时序信息，提高情感分析准确性
     num_frames = 8
 
     use_video = True
@@ -181,7 +187,6 @@ def task_cls_mosei():
     learning_rate = 3e-5       # 使用更保守的学习率
     max_epoch = 15             # 增加训练轮数
 
-    skip_interval = 2
     tokenizer = "/home/mz/demo/MyNet/mybert/models--bert-base-uncased"
     bert_model = "/home/mz/demo/MyNet/bert"
 
@@ -230,7 +235,7 @@ def task_finetune_msrvtt():
     draw_false_video = 23
     learning_rate = 1e-5
     max_epoch = 40
-    max_steps = 100000  # 改为整数形式
+    max_steps = 100000
 
 
 @ex.named_config
