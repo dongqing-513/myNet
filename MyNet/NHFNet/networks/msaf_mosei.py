@@ -32,39 +32,58 @@ class MSAFLSTMNet(nn.Module):
             'relu_dropout': _config['drop_rate'],
             'res_dropout': _config['drop_rate'],
             'normalize_before': _config['normalize_before'],
-            'num_groups': _config.get('num_groups', 2),  # 默认值为2
-            'reduction_ratio': _config.get('reduction_ratio', 8),  # 默认值为8
+            'num_groups': _config.get('num_groups', 4),  # 默认值改为4
+            'reduction_ratio': _config.get('reduction_ratio', 12),  # 默认值改为12
             'attn_mask': False
         }
 
-        self.cross_transformer = MultiModalFusionEncoder(
-            config=config,
-            num_layers=_config['num_layers'],
-            fusion_layers=4,  # 控制开始融合的层数
-            stride_layer=_config['skip_interval'],
-            fusion_type=_config['fusion_type'],
-            embed_dropout=_config['drop_rate']
-        )
-        """
-        self.cross_transformer = TransformerEncoder(
-            embed_dim=self.embed_dim,
-            num_heads=8,
-            layers=4,
-            attn_dropout = 0.4,
-            attn_mask=False
-        )"""
+        # 新增：获取是否启用参数共享的配置，默认为False
+        use_shared_transformer = _config.get('use_shared_transformer', False)
+
+        if use_shared_transformer:
+            # 创建共享的transformer编码器
+            self.shared_transformer = MultiModalFusionEncoder(
+                config=config,
+                num_layers=_config['num_layers'],
+                fusion_layers=4,  # 控制开始融合的层数
+                stride_layer=_config['skip_interval'],
+                fusion_type=_config['fusion_type'],
+                embed_dropout=_config['drop_rate'],
+                share_parameters=True  # 启用参数共享
+            )
+            # 使用共享的transformer
+            self.cross_transformer = self.shared_transformer
+            self.classifcation = self.shared_transformer
+        else:
+            # 原有的实现方式
+            self.cross_transformer = MultiModalFusionEncoder(
+                config=config,
+                num_layers=_config['num_layers'],
+                fusion_layers=4,  # 控制开始融合的层数
+                stride_layer=_config['skip_interval'],
+                fusion_type=_config['fusion_type'],
+                embed_dropout=_config['drop_rate']
+            )
+            """
+            self.cross_transformer = TransformerEncoder(
+                embed_dim=self.embed_dim,
+                num_heads=8,
+                layers=4,
+                attn_dropout = 0.4,
+                attn_mask=False
+            )"""
 
 
-        # 自注意力
+            # 自注意力
 
-        self.classifcation = MultiModalFusionEncoder(
-            config=config,  # 直接传入配置对象
-            num_layers=_config['num_layers'],
-            fusion_layers=4,  # 控制开始融合的层数
-            stride_layer=_config['skip_interval'],
-            fusion_type=_config['fusion_type'],
-            embed_dropout=_config['drop_rate']
-        )
+            self.classifcation = MultiModalFusionEncoder(
+                config=config,  # 直接传入配置对象
+                num_layers=_config['num_layers'],
+                fusion_layers=4,  # 控制开始融合的层数
+                stride_layer=_config['skip_interval'],
+                fusion_type=_config['fusion_type'],
+                embed_dropout=_config['drop_rate']
+            )
         """
         self.classifcation = TransformerEncoder(
             embed_dim=self.embed_dim,

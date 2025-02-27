@@ -68,17 +68,18 @@ def config():
     num_layers = int(12)
     mlp_ratio = float(4.0)
     use_mae = bool(False)
-    drop_rate = float(0.1)  # 降低dropout率到0.1
-    fusion_type = str('gate')  # 融合方式：'concat', 'add', 'gate'
-    skip_interval = int(1)  # 跳跃连接间隔，每隔几层添加一次跳跃连接
-    normalize_before = bool(True)  # 是否在attention和FFN之前进行归一化
-    attn_mask = bool(False)  # 是否使用注意力掩码
-    relu_dropout = float(0.15)  # ReLU层的dropout，降低到0.1
-    res_dropout = float(0.15)  # 残差连接的dropout，降低到0.1
+    drop_rate = float(0.1)
+    fusion_type = str('gate')
+    skip_interval = int(2)  # 增加跳跃连接间隔，帮助信息流动
+    normalize_before = bool(True)
+    use_shared_transformer = bool(True) # 是否启用参数共享
+    attn_mask = bool(False)
+    relu_dropout = float(0.1)  # 统一dropout率到0.1
+    res_dropout = float(0.1)   # 统一dropout率到0.1
 
     # 注意力机制参数
-    num_groups = int(4)  # 分组线性变换的分组数
-    reduction_ratio = int(16)  # 特征重校准的压缩比
+    num_groups = int(4)       # 保持4组
+    reduction_ratio = int(12)  # 从16减少到12，增强特征提取
 
     # Optimizer Setting
     optim_type = "adamw"
@@ -115,18 +116,6 @@ def config():
 
     # 批次设置
     accumulate_grad_batches = 32   # 增加梯度累积来模拟更大批次
-
-    # Checkpoint settings
-    ckpt_path = None  # Path to resume training from
-    save_top_k = 3    # Number of best checkpoints to keep
-    monitor = "val_loss"  # Metric to monitor
-    save_last = True  # Save the last checkpoint
-    every_n_epochs = 1  # Save checkpoint frequency
-    ckpt_dir = "/data1/checkpoints/MyNet"  # Directory to save checkpoints
-
-    # Training robustness
-    max_time = "12:00:00"  # Maximum training time
-    auto_resume = True     # Automatically resume from checkpoint
 
     # Downstream Setting
     vqav2_label_size = 3129

@@ -1,7 +1,10 @@
+my net 食用指南
+https://s47h0ifc72.feishu.cn/wiki/TnwPwJERvidTTQkeJeIchZ6Wnlh
+
 # TVLT
 
-### **[TVLT: Textless Vision-Language Transformer](https://arxiv.org/abs/2209.14156) [NeurIPS 2022 [bib](https://github.com/zinengtang/TVLT#citation)]**  
-[Zineng Tang*](https://zinengtang.github.io/), [Jaemin Cho*](https://j-min.io/), [Yixin Nie*](https://easonnie.github.io/), [Mohit Bansal](https://www.cs.unc.edu/~mbansal/)   
+### **[TVLT: Textless Vision-Language Transformer](https://arxiv.org/abs/2209.14156) [NeurIPS 2022 [bib](https://github.com/zinengtang/TVLT#citation)]**
+[Zineng Tang*](https://zinengtang.github.io/), [Jaemin Cho*](https://j-min.io/), [Yixin Nie*](https://easonnie.github.io/), [Mohit Bansal](https://www.cs.unc.edu/~mbansal/)
 
 Learning **compact** visual-linguistic Transformer representation from low-level continuous visual 👁 and audio👂 perception signal **without assuming the prior existence of written texts or tokens**
 
@@ -15,11 +18,11 @@ Learning **compact** visual-linguistic Transformer representation from low-level
   <big><b>Zineng Tang, Jaemin Cho, Yixin Nie, Mohit Bansal</b></big>
 </p> -->
 
-Transformers for Vision-Language (VL) representation learning heavily rely on text-based inputs. (Some works use audio channel only as auxiliary channel)  
+Transformers for Vision-Language (VL) representation learning heavily rely on text-based inputs. (Some works use audio channel only as auxiliary channel)
 
-TVLT takes audio and visual inputs for VL representation learning with **minimal modality-specific design** and **without text-specific modules such as tokenization and automatic speech recognition (ASR)**.  
+TVLT takes audio and visual inputs for VL representation learning with **minimal modality-specific design** and **without text-specific modules such as tokenization and automatic speech recognition (ASR)**.
 
-TVLT is pre-trained with vision-audio mathcing and mask autoencoding **(mask and then reconstruct the continuous input of video frames and audio spectrogram)**, following the previous idea of [training scalable vision learners with mask autoencoding on images (the Vision-BERT)](https://arxiv.org/abs/2111.06377).    
+TVLT is pre-trained with vision-audio mathcing and mask autoencoding **(mask and then reconstruct the continuous input of video frames and audio spectrogram)**, following the previous idea of [training scalable vision learners with mask autoencoding on images (the Vision-BERT)](https://arxiv.org/abs/2111.06377).
 
 <p align="center">
   <img align="middle" width="800" src="assets/architecture.png"/>
@@ -28,14 +31,14 @@ TVLT is pre-trained with vision-audio mathcing and mask autoencoding **(mask and
 
 <details>
   <summary>More</summary>
-  
+
 
   TVLT attains performance comparable to its text-based counterpart on various multimodal tasks, such as visual question answering and multimodal sentiment analysis, **with 28x faster inference speed and only 1/3 of the parameters**.
 
   <p align="center">
     <img align="middle" width="800" src="assets/teaser.png"/>
   </p>
-  
+
 </details>
 
 ## Install
@@ -45,18 +48,18 @@ conda create -n TVLT python=3.8   # You can also use other environment.
 ```
 
 ### Install `pytorch`, `torchvision`, and `torchaudio`
-The following version have been tested.  
+The following version have been tested.
 * `torch  1.10.0  1.12.1`
-* `torchvision  0.11.1  0.12.1` 
-* `torchaudio  0.10.0  0.13.1`  
+* `torchvision  0.11.1  0.12.1`
+* `torchaudio  0.10.0  0.13.1`
 
-You can try other version of `pytorch` but make sure that it will be compatible with your `cuda` and `cudnn`.  
+You can try other version of `pytorch` but make sure that it will be compatible with your `cuda` and `cudnn`.
 
 ### Install other dependencies
 ```
 pip install -r requirements.txt
 ```
-<!-- 
+<!--
 ## Model Weights
 [Huggingface Hub](https://huggingface.co/TVLT/models). -->
 
@@ -70,7 +73,7 @@ Getting familiar with TVLT by trying the following demos.
 <!-- <p align="center">
   <big><b>Demos Exmaples</b></big>
 
-</p> 
+</p>
 
 <p align="center">
   <img align="middle" height="180" src="assets/demo_example.png"/>
@@ -97,10 +100,10 @@ bash scripts/finetune_mosei.sh
 
 ## Released Models
 
-The model weights are hosted in [Huggingface Hub](https://huggingface.co/TVLT/models/tree/main).  
+The model weights are hosted in [Huggingface Hub](https://huggingface.co/TVLT/models/tree/main).
 If you have tried the demos, some models should have already been downloaded.
 
-The details of each released TVLT models are described in the table below.  
+The details of each released TVLT models are described in the table below.
 
 | Training    | Input Format | Component | Link |
 | --- | --- | --- | --- |
@@ -112,7 +115,7 @@ The details of each released TVLT models are described in the table below.
 **To be contined...** (Stay tuned, more pre-trained variants coming soon)
 <!-- * A TVLT model pre-trained on Howto100m + Yttemporal videos, then finetuned on CMU-MOSEI sentiment analysis:  -->
 
-<!-- * A TVLT model on CMU-MOSEI emotional analysis 
+<!-- * A TVLT model on CMU-MOSEI emotional analysis
 
 * Finetuned (Text-based) on CMU-MOSEI emotional analysis [[link]](https://huggingface.co/TVLT/models/resolve/main/TVLT-MOSEI-EA-text.ckpt) -->
 
@@ -136,14 +139,14 @@ See [Folder Structure](CODE.md)
 - [x] Initial Code Release
 - [x] Notebook Demos
 - [x] Colab
-- [ ] Release TTS question audios for VQA (We convert all the textual questions of VQAv2 to audio using Google TTS API.)   
+- [ ] Release TTS question audios for VQA (We convert all the textual questions of VQAv2 to audio using Google TTS API.)
 
 **...**
 
 
 ## Recommanded Usage
 
-In our experiment, we pre-train TVLT on HowTo100M and YTtemporal videos. However, we recommend to unlock the power of TVLT by pre-training TVLT on large-scale videos for more generic Vision-Language representation.  
+In our experiment, we pre-train TVLT on HowTo100M and YTtemporal videos. However, we recommend to unlock the power of TVLT by pre-training TVLT on large-scale videos for more generic Vision-Language representation.
 The resultant models can be either use to directly process video (with the audio channel) inputs such as audio-image/video retrieval, audio-VQA, TTS-based VQA or to extract visual-acoustic features for other tasks such as speech translation, multimodal content understanding, etc.
 
 
@@ -159,8 +162,8 @@ The resultant models can be either use to directly process video (with the audio
 
 ## Acknowledgement
 
-The idea of this paper is heavily inspired by [Masked Autoencoders Are Scalable Vision Learners](https://arxiv.org/abs/2111.06377).  
-Our codebase is based on [ViLT](https://github.com/dandelin/ViLT). 
+The idea of this paper is heavily inspired by [Masked Autoencoders Are Scalable Vision Learners](https://arxiv.org/abs/2111.06377).
+Our codebase is based on [ViLT](https://github.com/dandelin/ViLT).
 We thank the authors for their open-source contributions.
 
 ## Contact

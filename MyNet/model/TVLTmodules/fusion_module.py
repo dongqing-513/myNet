@@ -137,7 +137,8 @@ class MultiModalFusionEncoder(nn.Module):
         attn_dropout=0.1,
         embed_dropout=0.1,
         attn_mask=False,
-        normalize_before=True
+        normalize_before=True,
+        share_parameters=True  # 新增：是否启用参数共享
     ):
         super().__init__()
         # Initialize parameters
@@ -154,6 +155,7 @@ class MultiModalFusionEncoder(nn.Module):
         self.fusion_layers = fusion_layers
         self.stride_layer = stride_layer
         self.normalize_before = self.config.normalize_before
+        self.share_parameters = share_parameters  # 新增：记录是否启用参数共享
 
         # Embedding setup
         self.embed_scale = math.sqrt(self.config.hidden_size)
@@ -161,12 +163,18 @@ class MultiModalFusionEncoder(nn.Module):
         self.dropout = embed_dropout
 
         # Create progressive fusion layers
-        self.layers = nn.ModuleList([
-            FusionLayer(
-                config=self.config
-            )
-            for _ in range(num_layers)
-        ])
+        if share_parameters and num_layers > 0:  # 如果启用参数共享
+            # 创建一个共享的FusionLayer
+            shared_layer = FusionLayer(config=self.config)
+            # 创建多个指向同一个FusionLayer的引用
+            self.layers = nn.ModuleList([shared_layer for _ in range(num_layers)])
+        else:  # 原有的实现方式
+            self.layers = nn.ModuleList([
+                FusionLayer(
+                    config=self.config
+                )
+                for _ in range(num_layers)
+            ])
 
         # Final layer normalization
         self.layer_norm = LayerNorm(self.config.hidden_size)
