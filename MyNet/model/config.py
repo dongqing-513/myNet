@@ -73,6 +73,7 @@ def config():
     skip_interval = int(2)  # 增加跳跃连接间隔，帮助信息流动
     normalize_before = bool(True)
     use_shared_transformer = bool(True) # 是否启用参数共享
+    use_lightweight_align = bool(False) # 是否使用轻量级序列对齐模块
     attn_mask = bool(False)
     relu_dropout = float(0.1)  # 统一dropout率到0.1
     res_dropout = float(0.1)   # 统一dropout率到0.1

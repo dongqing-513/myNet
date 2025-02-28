@@ -9,7 +9,7 @@ sys.path.append('..')
 
 from NHFNet.modules.transformer import TransformerEncoder
 from model.TVLTmodules.fusion_module import MultiModalFusionEncoder
-
+from NHFNet.networks.sequence_align import SequenceAlignmentModule
 
 class MSAFLSTMNet(nn.Module):
     def __init__(self, _config):
@@ -108,108 +108,11 @@ class MSAFLSTMNet(nn.Module):
         # 归一化
         self.layer_norm = nn.LayerNorm(self.embed_dim)
 
-        # 是否使用轻量级序列长度对齐模块
-        self.use_lightweight = True  # 设置为False则使用原始实现
-
-        # ====== 原始序列长度对齐模块 ======
-        self.length_adapt = nn.ModuleList([
-            nn.Sequential(
-                # 第一层：1576 -> 394
-                nn.Conv1d(
-                    in_channels=self.embed_dim,
-                    out_channels=self.embed_dim,
-                    kernel_size=4,
-                    stride=4,
-                    padding=0
-                ),
-                nn.GELU(),
-                nn.Dropout(0.1)
-            ),
-            nn.Sequential(
-                # 第二层：394 -> 197
-                nn.Conv1d(
-                    in_channels=self.embed_dim,
-                    out_channels=self.embed_dim,
-                    kernel_size=2,
-                    stride=2,
-                    padding=0
-                ),
-                nn.GELU(),
-                nn.Dropout(0.1)
-            )
-        ])
-
-        # 原始特征归一化层
-        self.layer_norms = nn.ModuleList([
-            nn.LayerNorm(self.embed_dim),
-            nn.LayerNorm(self.embed_dim)
-        ])
-
-        # ====== 轻量级序列长度对齐模块 ======
-        if self.use_lightweight:
-            # 1. 特征增强卷积
-            self.feature_enhance = nn.ModuleList([
-                nn.Sequential(
-                    # 第一层：增强局部特征，不改变序列长度
-                    nn.Conv1d(self.embed_dim, self.embed_dim,
-                             kernel_size=3, stride=1, padding=1, groups=8),
-                    nn.GELU(),
-                    nn.Dropout(0.1)
-                ),
-                nn.Sequential(
-                    # 第二层：增强局部特征，不改变序列长度
-                    nn.Conv1d(self.embed_dim, self.embed_dim,
-                             kernel_size=3, stride=1, padding=1, groups=8),
-                    nn.GELU(),
-                    nn.Dropout(0.1)
-                )
-            ])
-
-            # 2. 高效池化层
-            self.pool_layers = nn.ModuleList([
-                nn.Sequential(
-                    # 第一次降采样：1576 -> 394
-                    nn.AvgPool1d(kernel_size=4, stride=4),
-                    nn.BatchNorm1d(self.embed_dim)
-                ),
-                nn.Sequential(
-                    # 第二次降采样：394 -> 197
-                    nn.AvgPool1d(kernel_size=2, stride=2),
-                    nn.BatchNorm1d(self.embed_dim)
-                )
-            ])
-
-            # 3. 残差连接
-            self.skip_connections = nn.ModuleList([
-                nn.Sequential(
-                    nn.Conv1d(self.embed_dim, self.embed_dim,
-                             kernel_size=1, stride=4),
-                    nn.BatchNorm1d(self.embed_dim)
-                ),
-                nn.Sequential(
-                    nn.Conv1d(self.embed_dim, self.embed_dim,
-                             kernel_size=1, stride=2),
-                    nn.BatchNorm1d(self.embed_dim)
-                )
-            ])
-
-            # 4. 特征重校准
-            self.channel_se = nn.ModuleList([
-                nn.Sequential(
-                    nn.AdaptiveAvgPool1d(1),
-                    nn.Conv1d(self.embed_dim, self.embed_dim // 4, 1),
-                    nn.ReLU(inplace=True),
-                    nn.Conv1d(self.embed_dim // 4, self.embed_dim, 1),
-                    nn.Sigmoid()
-                ),
-                nn.Sequential(
-                    nn.AdaptiveAvgPool1d(1),
-                    nn.Conv1d(self.embed_dim, self.embed_dim // 4, 1),
-                    nn.ReLU(inplace=True),
-                    nn.Conv1d(self.embed_dim // 4, self.embed_dim, 1),
-                    nn.Sigmoid()
-                )
-            ])
+        # 序列长度对齐模块
+        self.sequence_align = SequenceAlignmentModule(
+            embed_dim=self.embed_dim,
+            use_lightweight=_config.get('use_lightweight_align', False)  # 从配置中加载
+        )
 
         # 多种池化策略
         self.global_pool = nn.AdaptiveAvgPool2d((1, 768))  # 全局平均池化
@@ -251,87 +154,13 @@ class MSAFLSTMNet(nn.Module):
             nn.Tanh()
         )
 
-        # 改进1: 特征缩放层
-        self.modality_weights = nn.Parameter(torch.ones(3))  # 学习不同模态的权重
-
-        # 改进2: 位置编码
-        self.pos_encoder = nn.Parameter(torch.zeros(1, 512, self.embed_dim))
-        nn.init.normal_(self.pos_encoder, mean=0, std=0.02)
-
-        # 改进3: 分层池化
-        self.hierarchical_pool = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv1d(self.embed_dim, self.embed_dim, kernel_size=3, stride=2, padding=1),
-                nn.LayerNorm([self.embed_dim]),
-                nn.GELU()
-            ) for _ in range(3)
-        ])
-
-        # 改进4: 特征重校准
-        self.se_module = nn.Sequential(
-            nn.AdaptiveAvgPool1d(1),
-            nn.Linear(self.embed_dim, self.embed_dim // 16),
-            nn.ReLU(),
-            nn.Linear(self.embed_dim // 16, self.embed_dim),
-            nn.Sigmoid()
-        )
-
-        # 改进5: 多头注意力池化
-        self.multihead_pool = nn.MultiheadAttention(
-            embed_dim=self.embed_dim,
-            num_heads=8,
-            dropout=_config['drop_rate']
-        )
-
-
     def forward(self, av, txt, attention_mask):
         for i in range(self.max_feature_layers):
             if hasattr(self, "text_id"):
                 txt = self.text_model(txt, attention_mask)
 
-            # 1. 准备降采样
-            audio_visual_feature = av.transpose(1, 2)  # [batch, dim, seq_len]
-
-            if not self.use_lightweight:
-                # ====== 使用原始实现 ======
-                # 第一层降采样：1576 -> 394
-                audio_visual_feature = self.length_adapt[0](audio_visual_feature)
-
-                # 转置回来进行归一化
-                audio_visual_feature = audio_visual_feature.transpose(1, 2)
-                audio_visual_feature = self.layer_norms[0](audio_visual_feature)
-
-                # 第二层降采样：394 -> 197
-                audio_visual_feature = audio_visual_feature.transpose(1, 2)
-                audio_visual_feature = self.length_adapt[1](audio_visual_feature)
-
-                # 最后的转置和归一化
-                audio_visual_feature = audio_visual_feature.transpose(1, 2)
-                audio_visual_feature = self.layer_norms[1](audio_visual_feature)
-
-            else:
-                # ====== 使用轻量级实现 ======
-                for j in range(2):  # 两次降采样
-                    # 特征增强
-                    enhanced = self.feature_enhance[j](audio_visual_feature)
-
-                    # 通道注意力
-                    se_weight = self.channel_se[j](enhanced)
-                    enhanced = enhanced * se_weight
-
-                    # 降采样
-                    pooled = self.pool_layers[j](enhanced)
-
-                    # 残差连接
-                    residual = self.skip_connections[j](audio_visual_feature)
-                    audio_visual_feature = pooled + residual
-
-                    # 转置回来进行归一化
-                    if j == 1 or (j == 0 and not self.training):
-                        audio_visual_feature = audio_visual_feature.transpose(1, 2)
-                        audio_visual_feature = self.layer_norms[j](audio_visual_feature)
-                        if j < 1:  # 如果不是最后一层，转回去继续处理
-                            audio_visual_feature = audio_visual_feature.transpose(1, 2)
+            # 序列长度对齐，输入已经是 [batch, seq_len, dim]
+            audio_visual_feature = self.sequence_align(av)
 
             # 最终特征归一化
             audio_visual_feature = self.layer_norm(audio_visual_feature)
