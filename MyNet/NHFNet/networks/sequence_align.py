@@ -2,19 +2,29 @@ import torch
 import torch.nn as nn
 
 class SequenceAlignmentModule(nn.Module):
-    """序列对齐模块，支持两种实现方式：
-    1. 深度可分离卷积实现（use_lightweight=False）：
-       - 使用深度可分离卷积进行降采样，参数量更少
+    """序列对齐模块，支持三种实现方式：
+    1. 深度可分离卷积模式（use_lightweight=False, use_hybrid=False）：
+       - 优点：参数量少，计算效率高，直接通过可分离卷积降采样
+       - 缺点：特征提取能力相对有限，缺乏特征自适应能力
+       - 适用场景：资源受限、实时性要求高的环境
        - 两层结构：1576->394->197
+        
+    2. 特征增强模式（use_lightweight=True, use_hybrid=False）：
+       - 优点：具有通道注意力机制，增强特征表达，保留重要信息
+       - 缺点：计算复杂度较高，参数量增加，训练时间较长
+       - 适用场景：需要高质量特征表示，对计算资源要求不严格的场合
+       - 增强特征提取能力，同时使用残差连接保留原始信息
        
-    2. 轻量级实现（use_lightweight=True）：
-       - 使用特征增强、池化和残差连接
-       - 包含通道注意力机制
+    3. 混合动态融合模式（use_hybrid=True）：
+       - 优点：结合前两种方法的优势，动态平衡效率和准确率
+       - 缺点：实现最复杂，需要额外的融合门控制参数
+       - 适用场景：需要平衡准确率和效率的应用，具有充足计算资源
+       - 使用可学习的融合门自适应调整不同路径的权重
     """
-    def __init__(self, embed_dim, use_lightweight=False):
+    def __init__(self, embed_dim, config):
         super(SequenceAlignmentModule, self).__init__()
         self.embed_dim = embed_dim
-        self.use_lightweight = use_lightweight
+        self.config = config
 
         # ====== 原始序列长度对齐模块 ======
         self.length_adapt = nn.ModuleList([
@@ -71,7 +81,7 @@ class SequenceAlignmentModule(nn.Module):
         ])
 
         # ====== 轻量级序列长度对齐模块 ======
-        if self.use_lightweight:
+        if self.config.get('use_lightweight', False):
             # 1. 特征增强卷积
             self.feature_enhance = nn.ModuleList([
                 nn.Sequential(
@@ -136,6 +146,42 @@ class SequenceAlignmentModule(nn.Module):
                 )
             ])
 
+        # ====== 混合模式序列长度对齐模块 ======
+        if self.config.get('use_hybrid', False):
+            # 深度可分离卷积路径
+            self.depthwise_path = nn.Sequential(
+                nn.Conv1d(embed_dim, embed_dim, kernel_size=self.config.get('downsample_ratio', 4), 
+                         stride=self.config.get('downsample_ratio', 4), groups=embed_dim),
+                nn.Conv1d(embed_dim, embed_dim, kernel_size=1),
+                nn.GELU()
+            )
+
+            # 轻量级增强路径
+            self.enhance_path = nn.Sequential(
+                nn.Conv1d(embed_dim, embed_dim, kernel_size=3, padding=1, groups=8),
+                nn.GELU()
+            )
+
+            # 自适应池化
+            self.adaptive_pool = nn.AdaptiveAvgPool1d(
+                int(1 / self.config.get('downsample_ratio', 4) * 1000)  # 假设初始序列长度为1000
+            )
+
+            # 动态融合门
+            self.fusion_gate = nn.Sequential(
+                nn.Conv1d(2*embed_dim, embed_dim//2, 1),
+                nn.ReLU(),
+                nn.Conv1d(embed_dim//2, 1, 1),
+                nn.Sigmoid()
+            )
+
+            # 残差连接
+            self.skip_conv = nn.Conv1d(embed_dim, embed_dim, 
+                                      kernel_size=1, stride=self.config.get('downsample_ratio', 4))
+
+            # 归一化
+            self.norm = nn.LayerNorm(embed_dim)
+
     def forward(self, x):
         """
         输入: x shape [batch, seq_len, dim]
@@ -144,24 +190,29 @@ class SequenceAlignmentModule(nn.Module):
         # 准备降采样：[batch, seq_len, dim] -> [batch, dim, seq_len]
         x = x.transpose(1, 2)
 
-        if not self.use_lightweight:
-            # ====== 深度可分离卷积 ======
-            # 第一层降采样：1576 -> 394
-            x = self.length_adapt[0](x)
-            # [batch, dim, seq_len] -> [batch, seq_len, dim]
-            x = x.transpose(1, 2)
-            x = self.layer_norms[0](x)
+        if self.config.get('use_hybrid', False):
+            # ====== 混合动态融合模式 ======
+            # 深度可分离路径
+            dw_path = self.depthwise_path(x)
 
-            # [batch, seq_len, dim] -> [batch, dim, seq_len]
-            x = x.transpose(1, 2)
-            # 第二层降采样：394 -> 197
-            x = self.length_adapt[1](x)
-            # [batch, dim, seq_len] -> [batch, seq_len, dim]
-            x = x.transpose(1, 2)
-            x = self.layer_norms[1](x)
+            # 特征增强路径
+            enh = self.enhance_path(x)
+            lw_path = self.adaptive_pool(enh)
 
-        else:
-            # ====== 使用轻量级实现 ======
+            # 动态融合
+            concat = torch.cat([dw_path, lw_path], dim=1)
+            alpha = self.fusion_gate(concat)
+            fused = alpha * dw_path + (1 - alpha) * lw_path
+
+            # 残差连接
+            fused = fused + self.skip_conv(x)
+
+            # 归一化
+            fused = fused.transpose(1, 2)
+            return self.norm(fused)
+        
+        elif self.config.get('use_lightweight', False):
+            # ====== 特征增强模式 ======
             for j in range(2):  # 两次降采样
                 # 特征增强
                 enhanced = self.feature_enhance[j](x)
@@ -185,5 +236,20 @@ class SequenceAlignmentModule(nn.Module):
                     if j < 1:  # 如果不是最后一层，转回去继续处理
                         # [batch, seq_len, dim] -> [batch, dim, seq_len]
                         x = x.transpose(1, 2)
+        else:
+            # ====== 深度可分离卷积模式 ======
+            # 第一层降采样：1576 -> 394
+            x = self.length_adapt[0](x)
+            # [batch, dim, seq_len] -> [batch, seq_len, dim]
+            x = x.transpose(1, 2)
+            x = self.layer_norms[0](x)
+
+            # [batch, seq_len, dim] -> [batch, dim, seq_len]
+            x = x.transpose(1, 2)
+            # 第二层降采样：394 -> 197
+            x = self.length_adapt[1](x)
+            # [batch, dim, seq_len] -> [batch, seq_len, dim]
+            x = x.transpose(1, 2)
+            x = self.layer_norms[1](x)
 
         return x  # 返回 [batch, new_seq_len, dim]

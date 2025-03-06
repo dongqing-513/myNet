@@ -111,48 +111,47 @@ class MSAFLSTMNet(nn.Module):
         # 序列长度对齐模块
         self.sequence_align = SequenceAlignmentModule(
             embed_dim=self.embed_dim,
-            use_lightweight=_config.get('use_lightweight_align', False)  # 从配置中加载
+            config=_config  # 传递整个配置对象
         )
 
-        # 多种池化策略
-        self.global_pool = nn.AdaptiveAvgPool2d((1, 768))  # 全局平均池化
-        self.attention_pool = nn.Sequential(
-            nn.Linear(768, 128),  # 降维以减少参数
-            #nn.LayerNorm(768 * 2),
-            nn.GELU(),
-            nn.Linear(128, 1),
-            nn.Softmax(dim=1)
-        )
-
-        # 6分类任务 - 使用预训练权重
-        self.classifier = nn.ModuleList([
-            nn.Sequential(OrderedDict([
-                ('dense', nn.Linear(self.embed_dim, self.embed_dim))
-            ])),
-            nn.Linear(self.embed_dim, self.embed_dim * 2),
-            nn.Linear(self.embed_dim * 2, self.embed_dim * 2),
-            nn.Identity(),
-            nn.Linear(self.embed_dim * 2, 6)
-        ])
-
-        # 2分类任务 - 独立的分类器
-        self.binary_classifier = nn.Sequential(
-            # 特征转换层
-            nn.Linear(1536, 1024),  # 输入是拼接的两种池化结果
-            nn.LayerNorm(1024),
-            nn.GELU(),
-            nn.Dropout(0.1),
-
-            # 中间层
-            nn.Linear(1024, 512),
-            nn.LayerNorm(512),
-            nn.GELU(),
-            nn.Dropout(0.1),
-
-            # 输出层
-            nn.Linear(512, 1),
-            nn.Tanh()
-        )
+        # 高效多视图多尺度池化 (EMMP) - 基于五篇顶级论文的集成设计
+        self.pooling = nn.ModuleDict({
+            # 特征转换层 - 降低维度减少参数量 (Vision Transformer for Small-Size Datasets, ICLR 2022)
+            'transform': nn.Sequential(
+                nn.LayerNorm(self.embed_dim),  # 首先标准化特征
+                nn.Linear(self.embed_dim, self.embed_dim // 2),  # 降维50%
+                nn.GELU(),
+                nn.Dropout(0.1)
+            ),
+            # 多尺度特征提取 - 金字塔特征提取 (Pyramid Vision Transformer, ICCV 2021)
+            'pyramid': nn.ModuleDict({
+                'level1': nn.Conv1d(self.embed_dim // 2, self.embed_dim // 4, kernel_size=3, stride=1, padding=1),
+                'level2': nn.Conv1d(self.embed_dim // 2, self.embed_dim // 4, kernel_size=5, stride=1, padding=2),
+                'level3': nn.Conv1d(self.embed_dim // 2, self.embed_dim // 4, kernel_size=7, stride=1, padding=3),
+                'level4': nn.Conv1d(self.embed_dim // 2, self.embed_dim // 4, kernel_size=9, stride=1, padding=4),
+            }),
+            # 注意力池化 - 基于Non-local Neural Networks (Wang et al., CVPR 2018)
+            'attention': nn.Sequential(
+                nn.Linear(self.embed_dim // 2, 64),  # 进一步降维
+                nn.GELU(),
+                nn.Linear(64, 1),
+                nn.Softmax(dim=1)  # 对序列维度做归一化
+            ),
+            # 通道注意力 - 基于ECA-Net (Wang et al., CVPR 2020)
+            'channel_attn': nn.Sequential(
+                nn.Linear(self.embed_dim // 2, self.embed_dim // 8),
+                nn.GELU(),
+                nn.Linear(self.embed_dim // 8, self.embed_dim // 2),
+                nn.Sigmoid()
+            ),
+            # 特征融合 - 基于ResMLPs (Touvron et al., NeurIPS 2021)
+            'fusion': nn.Sequential(
+                nn.Linear(self.embed_dim, self.embed_dim),
+                nn.LayerNorm(self.embed_dim),
+                nn.GELU(),
+                nn.Dropout(0.1)
+            )
+        })
 
     def forward(self, av, txt, attention_mask):
         for i in range(self.max_feature_layers):
@@ -195,16 +194,38 @@ class MSAFLSTMNet(nn.Module):
             all = result1 + audio_visual_feature + l_result + av_result
             #print("\ntest:",all.shape) # torch.Size([1, 512, 768])
 
-            # 1. 注意力池化 - 学习每个时间步的重要性
-            # [1, 220, 768] -> [1, 220, 1]
-            attn_weights = self.attention_pool(all)
-            # [1, 220, 1] x [1, 220, 768] -> [1, 768]
-            attn_pooled = torch.bmm(attn_weights.transpose(1, 2), all).squeeze(1)
+            # 1. 特征转换 - 降维
+            transformed = self.pooling['transform'](all)  # [B, S, D/2]
 
-            # 全局平均池化
-            avg_pooled = torch.mean(all, dim=1)  # [1, 768]
+            # 2. 多尺度特征提取 (Pyramid Vision Transformer)
+            # 将特征转换为[B, D/2, S]以适用于卷积操作
+            transformed_t = transformed.transpose(1, 2)  # [B, D/2, S]
+            pyramid_features = []
+            for level in ['level1', 'level2', 'level3', 'level4']:
+                # 应用不同尺度的卷积捕获不同范围的上下文
+                level_feat = self.pooling['pyramid'][level](transformed_t)  # [B, D/4, S]
+                # 全局最大池化获取最显著的特征
+                level_pooled = F.adaptive_max_pool1d(level_feat, 1).squeeze(-1)  # [B, D/4]
+                pyramid_features.append(level_pooled)
 
-            # 二分类输出
-            binary_output = torch.tanh(attn_pooled)
+            # 3. 注意力池化 - 学习重要时间步 (Non-local Neural Networks)
+            attn_weights = self.pooling['attention'](transformed)  # [B, S, 1]
+            attn_pooled = torch.bmm(attn_weights.transpose(1, 2), transformed).squeeze(1)  # [B, D/2]
 
-            return binary_output
+            # 4. 全局统计池化 - 补充全局信息
+            max_pooled = torch.max(transformed, dim=1)[0]  # [B, D/2]
+            avg_pooled = torch.mean(transformed, dim=1)  # [B, D/2]
+
+            # 5. 通道注意力增强 (ECA-Net)
+            channel_weights = self.pooling['channel_attn'](avg_pooled)  # [B, D/2]
+            enhanced_pooled = attn_pooled * channel_weights + 0.2 * (max_pooled + avg_pooled)  # [B, D/2]
+
+            # 6. 特征集成 - 组合多尺度和注意力增强的特征
+            multi_scale = torch.cat(pyramid_features, dim=1)  # [B, D]
+            pooled_features = torch.cat([enhanced_pooled, multi_scale[:, :self.embed_dim//2]], dim=1)  # [B, D]
+
+            # 7. 特征增强与残差连接 (ResMLPs)
+            final_features = self.pooling['fusion'](pooled_features) + pooled_features  # [B, D]
+
+            # 返回包含特征的字典，与tvlt.py中的分类器兼容
+            return final_features  # [B, D=768]

@@ -11,3 +11,5 @@ MyNet/model/gadgets/*.pyc
 
 TVLT-MOSEI-EA.ckpt
 TVLT-MOSEI-SA.ckpt
+
+/home/mz/demo/find

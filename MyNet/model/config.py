@@ -82,6 +82,12 @@ def config():
     num_groups = int(4)       # 保持4组
     reduction_ratio = int(12)  # 从16减少到12，增强特征提取
 
+    # 序列对齐模块配置
+    use_lightweight = True  # 特征增强模式
+    use_hybrid = False  # 新增混合模式开关
+    adaptive_mode = True
+    downsample_ratio = 4  # 新增下采样率配置
+
     # Optimizer Setting
     optim_type = "adamw"
     learning_rate = 5e-5       # 降低基础学习率，避免训练不稳定
