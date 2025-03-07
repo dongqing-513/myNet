@@ -21,11 +21,11 @@ class MultiheadAttention(nn.Module):
         self.attn_dropout = attn_dropout
         self.head_dim = embed_dim // num_heads
         self.use_optimized = use_optimized
-        
+
         # 处理配置参数
         if config is None:
             config = {
-                'num_groups': 2,
+                'num_groups': 8,
                 'reduction_ratio': 8,
                 'hidden_size': embed_dim,
                 'drop_rate': attn_dropout

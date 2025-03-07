@@ -53,8 +53,11 @@ class FusionLayer(nn.Module):
         self.cross_attn_layer_norm = LayerNorm(self.config.hidden_size)
 
         # 前馈网络
-        self.fc1 = nn.Linear(self.config.hidden_size, self.config.hidden_size * 4)
-        self.fc2 = nn.Linear(self.config.hidden_size * 4, self.config.hidden_size)
+        # 引入瓶颈结构，降低参数量
+        bottleneck_dim = self.config.hidden_size // 2
+        self.fc1 = nn.Linear(self.config.hidden_size, bottleneck_dim)
+        self.fc2 = nn.Linear(bottleneck_dim, self.config.hidden_size * 2)
+        self.fc3 = nn.Linear(self.config.hidden_size * 2, self.config.hidden_size)
         self.final_layer_norm = LayerNorm(self.config.hidden_size)
 
         # Dropout settings
@@ -114,7 +117,9 @@ class FusionLayer(nn.Module):
             x = self.final_layer_norm(x)
         x = F.relu(self.fc1(x))
         x = F.dropout(x, p=self.config.relu_dropout, training=self.training)
-        x = self.fc2(x)
+        x = F.relu(self.fc2(x))
+        x = F.dropout(x, p=self.config.drop_rate, training=self.training)
+        x = self.fc3(x)
         x = F.dropout(x, p=self.config.drop_rate, training=self.training)
         x = residual + x
         if not self.normalize_before:
