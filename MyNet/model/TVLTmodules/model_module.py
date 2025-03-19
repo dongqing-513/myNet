@@ -11,13 +11,13 @@ import pytorch_lightning as pl
 
 from transformers.optimization import AdamW
 from transformers import get_cosine_schedule_with_warmup
-from model.TVLTmodules import heads, objectives, model_utils
+from model.TVLTmodules import heads, objectives, model_utils, msaf_mosei, text_lstm
 import model.TVLTmodules.tvlt as tvlt
 
 from huggingface_sb3 import load_from_hub
 
-import NHFNet.networks.msaf_mosei as msaf
-import NHFNet.networks.text_lstm as text_lstm
+import model.TVLTmodules.msaf_mosei as msaf
+import model.TVLTmodules.text_lstm as text_lstm
 
 
 # PyTorch Lightning 框架下进行深度学习模型的训练和评估
@@ -203,7 +203,7 @@ class Transformer(pl.LightningModule):
         # - 多模态特征融合
         text_tokens = batch[txtkey][0]  # 原始文本tokens
         attention_mask = batch['attention_mask'][0]  # 文本的attention mask，需要取[0]因为是batch数据
-        hidden_size = self.msaf(av, text_tokens, attention_mask)
+        hidden_size = self.msaf(av, text_tokens, attention_mask, return_attention=False)
 
         # 3. 返回所有需要的特征和输出
         ret = {

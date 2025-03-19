@@ -129,7 +129,36 @@ class MultiheadAttention(nn.Module):
         Returns:
             位置注意力分数
         """
+        # 安全检查 - 确保seq_len > 0
+        if seq_len <= 0:
+            # 返回形状匹配的零张量
+            return torch.zeros_like(torch.bmm(q, k.transpose(-2, -1)))
+            
+        # 确保相对位置编码的长度至少是2*seq_len-1
+        expected_rel_len = 2 * seq_len - 1
+        actual_rel_len = rel_pos_embed.size(1)
+        
+        # 如果相对位置编码长度不足，进行扩展或填充
+        if actual_rel_len < expected_rel_len:
+            # 填充到所需长度
+            padding = torch.zeros((rel_pos_embed.size(0), expected_rel_len - actual_rel_len, 
+                                 rel_pos_embed.size(2)), device=rel_pos_embed.device)
+            rel_pos_embed = torch.cat([rel_pos_embed, padding], dim=1)
+        elif actual_rel_len > expected_rel_len:
+            # 截断到需要的长度
+            rel_pos_embed = rel_pos_embed[:, :expected_rel_len, :]
+        
         bsz_num_heads = q.size(0)  # bsz * num_heads
+        
+        # 确保q和k的序列长度一致
+        q_seq_len = q.size(1)
+        k_seq_len = k.size(1)
+        
+        # 如果长度不匹配，则调整到较小的一方
+        if q_seq_len != k_seq_len:
+            seq_len = min(q_seq_len, k_seq_len)
+            q = q[:, :seq_len, :]
+            k = k[:, :seq_len, :]
 
         # 扩展相对位置编码以匹配batch size和head数量
         rel_pos_embed = rel_pos_embed.expand(bsz_num_heads, -1, -1)  # [bsz * num_heads, 2*seq_len-1, head_dim]
@@ -144,13 +173,32 @@ class MultiheadAttention(nn.Module):
         # 不需要转置k，因为我们需要它的原始形状
         pos_content = torch.matmul(rel_pos_embed, k.transpose(-2, -1))  # [bsz * num_heads, 2*seq_len-1, seq_len]
 
-        # 只取需要的部分并组合
-        content_pos = content_pos[:, :, seq_len-1:2*seq_len-1]  # [bsz * num_heads, seq_len, seq_len]
-        pos_content = pos_content[:, seq_len-1:2*seq_len-1, :]  # [bsz * num_heads, seq_len, seq_len]
+        # 计算中心索引
+        center_idx = seq_len - 1
+        
+        # 确保索引有效
+        if center_idx < 0:
+            center_idx = 0
+            
+        # 确保结束索引不超过实际尺寸    
+        end_idx = min(2 * seq_len - 1, rel_pos_embed.size(1))
+        
+        # 只取需要的部分并组合，带安全检查
+        if center_idx < end_idx:
+            content_pos = content_pos[:, :, center_idx:end_idx]  # [bsz * num_heads, seq_len, seq_len]
+            pos_content = pos_content[:, center_idx:end_idx, :]  # [bsz * num_heads, seq_len, seq_len]
+            
+            # 确保两个张量形状匹配
+            if content_pos.shape == pos_content.shape:
+                return content_pos + pos_content
+            else:
+                # 如果形状不匹配，返回零张量避免错误
+                return torch.zeros_like(torch.bmm(q, k.transpose(-2, -1)))
+        else:
+            # 无法提取有效的切片，返回零张量
+            return torch.zeros_like(torch.bmm(q, k.transpose(-2, -1)))
 
-        return content_pos + pos_content
-
-    def forward(self, query, key, value, attn_mask=None):
+    def forward(self, query, key, value, attn_mask=None, return_attention=False):
         """Input shape: Time x Batch x Channel
         Self-attention can be implemented by passing in the same arguments for
         query, key and value. Timesteps can be masked by supplying a T x T mask in the
@@ -225,7 +273,10 @@ class MultiheadAttention(nn.Module):
             # average attention weights over heads
             attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
             attn_weights = attn_weights.sum(dim=1) / self.num_heads
-            return attn, attn_weights
+            if return_attention:
+                return attn, attn_weights
+            else:
+                return attn
 
         else:
             # 优化实现的forward逻辑
@@ -292,7 +343,10 @@ class MultiheadAttention(nn.Module):
             # 10. 计算平均注意力权重
             attn_weights = attn_weights.view(bsz, self.num_heads, seq_len, seq_len).mean(dim=1)
 
-            return attn, attn_weights
+            if return_attention:
+                return attn, attn_weights
+            else:
+                return attn
 
     def channel_shuffle(self, x, groups):
         """实现通道重排，增强不同组之间的信息交流

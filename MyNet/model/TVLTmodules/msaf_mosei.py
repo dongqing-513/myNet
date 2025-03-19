@@ -2,14 +2,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import OrderedDict
-from NHFNet.networks.text_lstm import BERTTextLSTMNet
-import sys
-sys.path.append('..')
+from model.TVLTmodules.text_lstm import BERTTextLSTMNet
+# 移除旧的路径添加
+# import sys
+# sys.path.append('..')
 # from MSAF import MSAF
 
-from NHFNet.modules.transformer import TransformerEncoder
+from model.TVLTmodules.transformer import TransformerEncoder
 from model.TVLTmodules.fusion_module import MultiModalFusionEncoder
-from NHFNet.networks.sequence_align import SequenceAlignmentModule
+from model.TVLTmodules.sequence_align import SequenceAlignmentModule
+# 导入可视化工具
+from tool.visualization import AttentionVisualizer
 
 class MSAFLSTMNet(nn.Module):
     def __init__(self, _config):
@@ -36,6 +39,11 @@ class MSAFLSTMNet(nn.Module):
             'reduction_ratio': _config.get('reduction_ratio', 12),  # 默认值改为12
             'attn_mask': False
         }
+
+        # 新增：初始化可视化工具类
+        vis_dir = _config.get('visualization_dir', 'visualizations/msaf')
+        self.enable_visualization = _config.get('enable_visualization', False)
+        self.visualizer = AttentionVisualizer(save_dir=vis_dir) if self.enable_visualization else None
 
         # 新增：获取是否启用参数共享的配置，默认为False
         use_shared_transformer = _config.get('use_shared_transformer', False)
@@ -130,7 +138,7 @@ class MSAFLSTMNet(nn.Module):
                 'level3': nn.Conv1d(self.embed_dim // 2, self.embed_dim // 4, kernel_size=7, stride=1, padding=3),
                 'level4': nn.Conv1d(self.embed_dim // 2, self.embed_dim // 4, kernel_size=9, stride=1, padding=4),
             }),
-            # 注意力池化 - 基于Non-local Neural Networks (Wang et al., CVPR 2018)
+            # 注意力池化 - 学习重要时间步 (Non-local Neural Networks, Wang et al., CVPR 2018)
             'attention': nn.Sequential(
                 nn.Linear(self.embed_dim // 2, 64),  # 进一步降维
                 nn.GELU(),
@@ -153,7 +161,7 @@ class MSAFLSTMNet(nn.Module):
             )
         })
 
-    def forward(self, av, txt, attention_mask):
+    def forward(self, av, txt, attention_mask, return_attention=False):
         for i in range(self.max_feature_layers):
             if hasattr(self, "text_id"):
                 txt = self.text_model(txt, attention_mask)
@@ -164,6 +172,11 @@ class MSAFLSTMNet(nn.Module):
             # 最终特征归一化
             audio_visual_feature = self.layer_norm(audio_visual_feature)
             txt = self.layer_norm(txt)
+
+            # 如果启用可视化功能，则记录原始特征
+            if self.enable_visualization and self.visualizer is not None:
+                self.visualizer.register_features('text_features', txt)
+                self.visualizer.register_features('av_features', audio_visual_feature)
 
             # txt - self-attention torch.Size([1, 197, 768])
             result1 = self.classifcation(txt)
@@ -176,6 +189,11 @@ class MSAFLSTMNet(nn.Module):
             av_l = self.cross_transformer(result1, audio_visual_feature, audio_visual_feature)
             # print("==========cross_transformer2: (V,A)->T=========done",av_l.shape) # torch.Size([1, 512, 768])
 
+            # 如果启用可视化功能，则记录交叉注意力结果
+            if self.enable_visualization and self.visualizer is not None:
+                self.visualizer.register_features('text_guided_av', l_av)
+                self.visualizer.register_features('av_guided_text', av_l)
+
             # 融合特征的自注意力处理
             l_result = self.classifcation(av_l)
             # print("==========cross_transformer2 -> self-attention=========done",l_result.shape) # torch.Size([1, 512, 768])
@@ -184,15 +202,17 @@ class MSAFLSTMNet(nn.Module):
             av_result = self.classifcation(l_av)
             # print("==========cross_transformer1 -> self-attention========done",av_result.shape) # torch.Size([1, 512, 768])
 
-            # TODO: 现在直接用训练好的三维序列进行拼接result1 + result2 + l_result + av_result，直接输入liner进行分类
-            # 在计算标号和损失之间的差异时，遇到了维度问题。需要查一下最新的如何将transformer结果进行预测和反向传播
-            # 每个结果的最后一个时间步的输出
-            # result1 = result1[-1]
-            #print("result1",result1.shape)
-            # torch.Size([512, 768]) 不取[-1]：torch.Size([1, 512, 768])
+            # 如果启用可视化功能，则记录自注意力结果
+            if self.enable_visualization and self.visualizer is not None:
+                self.visualizer.register_features('text_self_attention', l_result)
+                self.visualizer.register_features('av_self_attention', av_result)
 
             all = result1 + audio_visual_feature + l_result + av_result
             #print("\ntest:",all.shape) # torch.Size([1, 512, 768])
+
+            # 如果启用可视化功能，则记录融合后的特征
+            if self.enable_visualization and self.visualizer is not None:
+                self.visualizer.register_features('fused_features', all)
 
             # 1. 特征转换 - 降维
             transformed = self.pooling['transform'](all)  # [B, S, D/2]
@@ -227,5 +247,8 @@ class MSAFLSTMNet(nn.Module):
             # 7. 特征增强与残差连接 (ResMLPs)
             final_features = self.pooling['fusion'](pooled_features) + pooled_features  # [B, D]
 
-            # 返回包含特征的字典，与tvlt.py中的分类器兼容
+            # 如果启用可视化功能，则记录最终特征
+            if self.enable_visualization and self.visualizer is not None:
+                self.visualizer.register_features('final_features', final_features)
+
             return final_features  # [B, D=768]

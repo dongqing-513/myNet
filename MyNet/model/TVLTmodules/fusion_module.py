@@ -71,7 +71,8 @@ class FusionLayer(nn.Module):
         encoder_out=None, #keyvalue 对应MultiModalFusionEncoder传入的x_k
         encoder_mask=None,
         self_attn_mask=None,
-        layer_idx=None
+        layer_idx=None,
+        return_attention=False
     ):
         """
         Forward pass for FusionLayer
@@ -81,14 +82,21 @@ class FusionLayer(nn.Module):
             encoder_mask: Encoder attention mask
             self_attn_mask: Self-attention mask
             layer_idx: Layer index for progressive fusion
+            return_attention: Whether to return attention weights
         """
         residual = x
+        attention_weights = {}
 
         # 1. 自注意力（同模态）
         if self.normalize_before:
             x = self.self_attn_layer_norm(x)
         #  Q、K、V 都来自同一个模态，即输入 x。用于在同一模态内捕获特征之间的依赖关系
-        x, _ = self.self_attn(query=x, key=x, value=x)
+        if return_attention:
+            x, self_attn = self.self_attn(query=x, key=x, value=x, return_attention=True)
+            attention_weights['self_attn'] = self_attn
+        else:
+            x = self.self_attn(query=x, key=x, value=x)
+            
         x = F.dropout(x, p=self.config.drop_rate, training=self.training)
         x = residual + x
         if not self.normalize_before:
@@ -100,12 +108,23 @@ class FusionLayer(nn.Module):
             if self.normalize_before:
                 x = self.cross_attn_layer_norm(x)
             # Q、K、V 来自不同模态，即输入 encoder_out。用于在不同模态之间捕获特征之间的依赖关系
-            x, _ = self.cross_attn(
-                query=x,
-                key=encoder_out,
-                value=encoder_out,
-                # attn_mask=encoder_mask
-            )
+            if return_attention:
+                x, cross_attn = self.cross_attn(
+                    query=x,
+                    key=encoder_out,
+                    value=encoder_out,
+                    return_attention=True
+                    # attn_mask=encoder_mask
+                )
+                attention_weights['cross_attn'] = cross_attn
+            else:
+                x = self.cross_attn(
+                    query=x,
+                    key=encoder_out,
+                    value=encoder_out,
+                    # attn_mask=encoder_mask
+                )
+                
             x = F.dropout(x, p=self.config.drop_rate, training=self.training)
             x = residual + x
             if not self.normalize_before:
@@ -125,6 +144,8 @@ class FusionLayer(nn.Module):
         if not self.normalize_before:
             x = self.final_layer_norm(x)
 
+        if return_attention:
+            return x, attention_weights
         return x
 
 class MultiModalFusionEncoder(nn.Module):
@@ -218,13 +239,14 @@ class MultiModalFusionEncoder(nn.Module):
                 )
             })
 
-    def forward(self, x_in, x_in_k=None, x_in_v=None):
+    def forward(self, x_in, x_in_k=None, x_in_v=None, return_attention=False):
         """
         Forward pass for MultiModalFusionEncoder
         Args:
             x_in: Main input features [batch_size, seq_len, hidden_size]
             x_in_k: Optional key input features
             x_in_v: Optional value input features
+            return_attention: Whether to return attention weights
         """
         # 1. Positional encoding and embedding
         x = self.embed_scale * x_in
@@ -248,6 +270,9 @@ class MultiModalFusionEncoder(nn.Module):
         # 在不影响自注意力处理的情况下实现特征重用
         start_fusion_layer = max(0, len(self.layers) - self.fusion_layers)
         cross_attn_states = []  # 存储交叉注意力的中间状态
+        
+        # 用于收集所有层的注意力权重
+        all_attention_weights = {} if return_attention else None
 
         for i, layer in enumerate(self.layers):
             # 存储交叉注意力的中间状态（按照stride_layer的间隔）
@@ -260,7 +285,13 @@ class MultiModalFusionEncoder(nn.Module):
                 # 交叉注意力处理 attention -> dropout -> residual -> norm
                 # 保留原始输入，在每个融合层和跳跃连接后，添加残差连接
                 residual = x
-                x = layer(x, x_k, x_v)
+                
+                if return_attention:
+                    x, attn_weights = layer(x, x_k, x_v, return_attention=True)
+                    all_attention_weights[f'layer_{i}'] = attn_weights
+                else:
+                    x = layer(x, x_k, x_v)
+                    
                 x = F.dropout(x, p=self.dropout, training=self.training)
                 x = residual + x
                 x = self.layer_norm(x)
@@ -295,7 +326,13 @@ class MultiModalFusionEncoder(nn.Module):
             else:
                 # 自注意力处理（保持独立的逻辑）
                 residual = x
-                x = layer(x)
+                
+                if return_attention:
+                    x, attn_weights = layer(x, return_attention=True)
+                    all_attention_weights[f'layer_{i}'] = attn_weights
+                else:
+                    x = layer(x)
+                    
                 x = F.dropout(x, p=self.dropout, training=self.training)
                 x = residual + x
                 x = self.layer_norm(x)
@@ -304,4 +341,6 @@ class MultiModalFusionEncoder(nn.Module):
         if self.layer_norm is not None:
             x = self.layer_norm(x)
 
+        if return_attention:
+            return x, all_attention_weights
         return x

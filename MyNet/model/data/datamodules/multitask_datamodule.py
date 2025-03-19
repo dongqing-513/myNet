@@ -65,6 +65,9 @@ class MTDataModule(LightningDataModule):
             sampler=self.train_sampler,
             num_workers=self.num_workers,
             collate_fn=self.collate,
+            persistent_workers=True if self.num_workers > 0 else False,
+            prefetch_factor=2 if self.num_workers > 0 else None,
+            timeout=120,  # 增加超时时间，避免临时文件问题
         )
         return loader
 
@@ -76,6 +79,9 @@ class MTDataModule(LightningDataModule):
             sampler=self.val_sampler,
             num_workers=self.num_workers,
             collate_fn=self.collate,
+            persistent_workers=True if self.num_workers > 0 else False,
+            prefetch_factor=2 if self.num_workers > 0 else None,
+            timeout=120,  # 增加超时时间，避免临时文件问题
         )
         return loader
 
@@ -87,5 +93,8 @@ class MTDataModule(LightningDataModule):
             sampler=self.test_sampler,
             num_workers=self.num_workers,
             collate_fn=self.collate,
+            persistent_workers=True if self.num_workers > 0 else False,
+            prefetch_factor=2 if self.num_workers > 0 else None,
+            timeout=120,  # 增加超时时间，避免临时文件问题
         )
         return loader

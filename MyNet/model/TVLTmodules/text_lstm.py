@@ -11,7 +11,7 @@ class BERTTextLSTMNet(nn.Module):
         self.bert = BertModel.from_pretrained(config.get("bert_model", "/home/mz/demo/MyNet/bert"))
 
         # 保存max_text_len用于维度检查
-        self.max_text_len = config.get("max_text_len", 197)
+        self.max_text_len = config.get("max_text_len", 221)  # 更新默认值以适应新的序列长度
 
         # 两层LSTM，使用中等隐藏维度以平衡性能和计算量
         hidden_size = 384  # 提升到BERT维度的一半，使双向LSTM输出维度与BERT匹配

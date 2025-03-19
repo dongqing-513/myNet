@@ -10,11 +10,12 @@ from model.TVLTmodules import heads, objectives
 
 from transformers.models.bert.modeling_bert import BertConfig, BertEmbeddings
 """
-import sys
-sys.path.append('/home/mz/demo/MyNet/NHFNet/networks')
-from msaf_mosei import BottleAttentionNet
+# 旧路径，现已更新
+# import sys
+# sys.path.append('/home/mz/demo/MyNet/NHFNet/networks')
+# from msaf_mosei import BottleAttentionNet
+from model.TVLTmodules.msaf_mosei import MSAFLSTMNet
 """
-
 
 class AudioPatchEmbed(nn.Module):
     """ Audio to Patch Embedding"""
@@ -138,7 +139,7 @@ class TVLT(nn.Module):
                 for i in range(depth)
             ]
         )
-        
+
         if self.use_mae:
             self.decoder_blocks = nn.ModuleList(
                 [
@@ -154,7 +155,7 @@ class TVLT(nn.Module):
                 ]
             )
         """
-        self.transformer = BottleAttentionNet()
+        self.transformer = BottleAttentionNet(config=config)
 
         hs = config["hidden_size"]
         self.use_text = config['use_text']
@@ -177,7 +178,7 @@ class TVLT(nn.Module):
         if config["loss_names"]["vam"] > 0 or config["loss_names"]["vtm"] > 0:
             self.matching_score = heads.MatchingHead(config["hidden_size"])
             self.matching_score.apply(objectives.init_weights)
-            
+
             if config["loss_names"]["vatr"] > 0:
                 import copy
                 self.rank_output = copy.deepcopy(self.matching_score)
@@ -408,7 +409,7 @@ class TVLT(nn.Module):
     def forward(self, text_ids=None, text_masks=None, audio=None, audio_masks=None,
                 video=None, video_masks=None, mask_visual=False, use_mae=False,
                 audio_spans=None):
-        # Dimension of input video tensor: (batch_size, number_of_frames, rgb_channel, width, height)  
+        # Dimension of input video tensor: (batch_size, number_of_frames, rgb_channel, width, height)
         # 1, 8, 3, 224, 224
         # b, t, c, h, w = video.shape：在这里，b = 1（批次大小为 1），t = 8（8 个帧），c = 3（RGB 三个通道），h = 224（高度为 224），w = 224（宽度为 224
         # Dimension of input audio tensor: (batch_size, number_of_audio_channels, time, spectrogram)
@@ -419,7 +420,7 @@ class TVLT(nn.Module):
             text_embeds = None
 
             """
-            x_a = self.patch_embed_a(audio)  #audio_patch_size=[2, 128]         
+            x_a = self.patch_embed_a(audio)  #audio_patch_size=[2, 128]
             x_a += self.freq_embed.repeat(1, x_a.size(1)//self.freq_patch_size, 1)
             x_a += torch.repeat_interleave(self.pos_embed_a[:, :x_a.size(
                 1)//self.freq_patch_size], self.freq_patch_size, dim=1)
@@ -430,31 +431,31 @@ class TVLT(nn.Module):
             _, _, H, W = audio.shape
             x_a = self.patch_embed_a(audio)
             B, L, C = x_a.shape
-            
+
             # 动态计算patch数量和大小
             freq_patches = H // self.audio_patch_size[0]
             time_patches = W // self.audio_patch_size[1]
             total_patches = freq_patches * time_patches
-            
+
             # 计算频率嵌入的重复策略
             freq_embed_size = min(self.freq_embed.size(1), freq_patches)
             freq_repeat = (L + freq_embed_size - 1) // freq_embed_size
-            
+
             # 截取并重复频率嵌入
             freq_embed = self.freq_embed[:, :freq_embed_size]
             freq_embed = freq_embed.repeat(1, freq_repeat, 1)[:, :L]
-            
+
             # 位置嵌入也使用类似策略
             pos_embed_size = min(self.pos_embed_a.size(1), freq_repeat)
             pos_embed = self.pos_embed_a[:, :pos_embed_size]
             pos_embed = torch.repeat_interleave(pos_embed, freq_patches, dim=1)[:, :L]
-            
+
             # 应用嵌入
             x_a = x_a + freq_embed + pos_embed + self.type_embed_a
-            
+
             # 获取patch mask
             full_x_mask_a = self.get_patch_mask(audio)
-                
+
 
         if video is not None:
             b, t, c, h, w = video.shape  # (128, 8, 3, 224, 224)
@@ -464,7 +465,7 @@ class TVLT(nn.Module):
             # parch embed
             x_v = self.patch_embed_v(video.reshape(b*t, c, h, w))
             # (128, 1568, 768)
-            x_v = x_v.reshape(b, t * x_v.size(1), x_v.size(-1))       
+            x_v = x_v.reshape(b, t * x_v.size(1), x_v.size(-1))
             frame_patch_len = x_v.size(1)//t
             # (128, 1568, 768)
             # pos embed
@@ -474,7 +475,7 @@ class TVLT(nn.Module):
             x_v += self.type_embed_v
             # (1, 1568, 768)
             full_x_mask_v = self.get_patch_mask(video)
-        
+
         """
         if mask_visual:
             if video is not None:
@@ -499,11 +500,11 @@ class TVLT(nn.Module):
         else:
             if audio is not None and video is not None:
                 # 直接拼接音频和视频的掩码，不需要CLS token的掩码
-                enc_mask = torch.cat([full_x_mask_a, full_x_mask_v], 1)
-                
+                # enc_mask = torch.cat([full_x_mask_a, full_x_mask_v], 1)  # 注释掉，未使用
+
                 # 直接拼接音频和视频特征，不添加CLS token
                 x = torch.cat([x_a, x_v], 1)
-                
+
             elif audio is not None:
                 enc_mask = full_x_mask_a
                 x = x_a
@@ -511,16 +512,16 @@ class TVLT(nn.Module):
             if text_embeds is not None:
                 # 直接拼接文本掩码和视频掩码，不需要CLS token的掩码
                 enc_mask = torch.cat([text_masks, full_x_mask_v], 1)
-                
+
                 # 直接拼接文本嵌入和视频特征，不添加CLS token
                 x = torch.cat([text_embeds, x_v], 1)
 
-        # 进入encoder 
+        # 进入encoder
         for blk in self.blocks:
             x = blk(x, enc_mask)
         """
-        x = self.transformer(x_a,x_v)
-        
+        x = self.transformer(x_a, x_v, return_attention=False)
+
         x = self.norm(x)
         # 不加cls token,audio patches(1, 232, 768), patches size[2, 128] ,(1, 1800, 768)
         # 不加cls token,audio patches(1, 196, 768), patches size[16, 16] ,(1, 1764, 768)

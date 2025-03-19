@@ -144,6 +144,9 @@ def config():
     load_hub_path = ""
     num_workers = 16
 
+    # 可视化配置项
+    enable_visualization = False  # 是否启用可视化功能
+    visualization_dir = "visualizations"  # 可视化结果保存目录
 
 @ex.named_config
 def task_cls_moseiemo():
@@ -189,7 +192,7 @@ def task_cls_mosei():
     # 词汇表的大小。可以识别的不同单词或标记的总数。
     vocab_size = 30522
     # 输入文本的最大长度。如果文本长度超过这个值，可能会被截断。表示最长的文本长度为 768 个标记或字符。
-    max_text_len = 197 # 512 (audio patch size (2,128))225 78 220
+    max_text_len = 221 # 512 (audio patch size (2,128))225 78 220 197
     # 是否进行全词掩码。以整个单词为单位进行掩码或单个标记
     whole_word_masking = False
     # 随机掩码标记的概率。有 0.15 的概率会随机选择一个标记进行掩码，然后让模型预测被掩码的标记
@@ -199,6 +202,9 @@ def task_cls_mosei():
     # 进行分布式训练
     num_nodes = 1
 
+    # 可视化配置项
+    enable_visualization = True  # 启用可视化功能
+    visualization_dir = "visualizations/mosei"  # 特定任务的可视化结果保存目录
 
 @ex.named_config
 def task_finetune_vqa():

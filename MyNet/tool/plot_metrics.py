@@ -4,8 +4,8 @@ import numpy as np
 from math import ceil
 
 
-png_name = '0306fusionlayer.png'
-log_file = '/home/mz/demo/MyNet/0306fusionlayer.log'
+png_name = '0318avfusionlayer.png'
+log_file = '/home/mz/demo/MyNet/0318avfusionlayer.log'
 
 def extract_metrics(log_file):
     # 使用字典来存储每个 epoch 的所有值和最佳值
